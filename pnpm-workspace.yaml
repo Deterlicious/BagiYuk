@@ -1,0 +1,8 @@
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+  workerd: true
+nodeLinker: hoisted
+minimumReleaseAgeExclude:
+  - lucide-react@1.29.0
+  - postcss@8.5.26

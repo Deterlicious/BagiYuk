@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+:root {
+  --canvas: #f7f3e8;
+  --surface: #fffdf8;
+  --surface-strong: #ffffff;
+  --ink: #18221d;
+  --muted: #667169;
+  --brand: #0e6b5c;
+  --brand-strong: #084c42;
+  --accent: #ed6a4f;
+  --accent-soft: #fde8df;
+  --line: #dcd6c9;
+  --success: #267357;
+  --warning: #9a5a12;
+  --danger: #b83b3b;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-line: var(--line);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-jakarta), system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    linear-gradient(rgba(24, 34, 29, 0.025) 1px, transparent 1px),
+    var(--canvas);
+  background-size: 100% 32px;
+  color: var(--ink);
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.receipt-edge {
+  position: relative;
+}
+
+.receipt-edge::after {
+  position: absolute;
+  right: 16px;
+  bottom: -7px;
+  left: 16px;
+  height: 14px;
+  background:
+    radial-gradient(circle at 7px 0, transparent 7px, var(--surface) 7.5px) 0 0 / 14px 14px repeat-x;
+  content: "";
+}
+
+.price {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
