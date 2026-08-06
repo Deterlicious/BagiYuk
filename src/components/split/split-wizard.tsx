@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronLeft } from "lucide-react";
 import { useEffect, useReducer, useState } from "react";
@@ -19,11 +20,21 @@ import {
 } from "@/features/splitter/draft";
 import { AssignmentStep } from "./steps/assignment-step";
 import { ParticipantsStep } from "./steps/participants-step";
-import { ReceiptInputStep } from "./steps/receipt-input-step";
 import { ResultsStep } from "./steps/results-step";
 import { VerificationStep } from "./steps/verification-step";
 
 const stepLabels = ["Struk", "Periksa", "Anggota", "Bagikan", "Hasil"] as const;
+const ReceiptInputStep = dynamic(
+  () => import("./steps/receipt-input-step").then((module) => module.ReceiptInputStep),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="py-12 text-center" aria-live="polite">
+        <p className="text-sm font-bold text-muted">Menyiapkan pembaca struk…</p>
+      </section>
+    ),
+  },
+);
 
 export function SplitWizard({
   initialSample,
