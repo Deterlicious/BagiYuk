@@ -1,4 +1,4 @@
-const CACHE_NAME = "bagiyuk-shell-v2";
+const CACHE_NAME = "bagiyuk-shell-v3";
 const SHELL = ["/", "/split/new", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -36,7 +36,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (["script", "style", "font"].includes(request.destination) || url.pathname.startsWith("/icons/")) {
+  if (["script", "style"].includes(request.destination)) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          return response;
+        })
+        .catch(async () => (await caches.match(request)) || Response.error()),
+    );
+    return;
+  }
+
+  if (request.destination === "font" || url.pathname.startsWith("/icons/")) {
     event.respondWith(
       caches.match(request).then(
         (cached) =>
