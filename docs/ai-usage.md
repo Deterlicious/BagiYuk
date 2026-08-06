@@ -18,6 +18,8 @@ The production adapter uses two active open models behind the same Workers AI bi
 - Primary: `@cf/google/gemma-4-26b-a4b-it`. Cloudflare documents Gemma 4 as supporting document/PDF parsing, multilingual OCR, variable image aspect ratios, and vision understanding.
 - Fallback: `@cf/moondream/moondream3.1-9B-A2B`, a smaller image-to-text model intended for OCR and structured output.
 
+Normal receipts use Gemma first. Very tall receipts use the faster Moondream extraction first so a long item list does not spend the entire request budget waiting for the larger model; Gemma remains the second attempt.
+
 The primary and fallback can be overridden server-side with `RECEIPT_AI_MODEL` and `RECEIPT_AI_FALLBACK_MODEL`. Check the current official [Workers AI catalog](https://developers.cloudflare.com/workers-ai/models/) before changing either model.
 
 PaddleOCR was evaluated because it is a strong Apache-licensed OCR project on GitHub, but its Python/native inference runtime does not run inside this OpenNext Worker. Adding it would require a separate container/server and a materially different deployment architecture. The current hybrid keeps the MVP serverless and uses no browser secret.

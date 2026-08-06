@@ -68,7 +68,7 @@ describe("receipt parser boundary", () => {
           tax: 63_130,
           serviceCharge: 41_300,
           discount: 0,
-          rounding: 70,
+          rounding: null,
           total: 694_500,
         },
       },
@@ -79,6 +79,7 @@ describe("receipt parser boundary", () => {
     });
 
     expect(parsed.items).toHaveLength(2);
+    expect(parsed.summary.rounding.value).toBe(70);
     expect(parsed.summary.total).toEqual({ value: 694_500, confidence: 0.96 });
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -109,6 +110,32 @@ describe("receipt parser boundary", () => {
     expect(parsed.items[0]!.lineTotal.value).toBe(198_000);
     expect(parsed.summary.total.value).toBe(217_800);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("tries the faster OCR model first for a tall receipt", async () => {
+    const run = vi.fn().mockResolvedValue({
+      answer: JSON.stringify({
+        merchantName: "Checking",
+        items: [{ name: "NASI PUTIH", quantity: 40, unitPrice: 13_000, lineTotal: 520_000 }],
+        summary: {
+          subtotal: 520_000,
+          tax: 52_000,
+          serviceCharge: 0,
+          discount: 0,
+          rounding: 0,
+          total: 572_000,
+        },
+      }),
+    });
+    await new CloudflareReceiptParserProvider({ run }).parse({
+      mimeType: "image/jpeg",
+      base64: "receipt",
+      width: 900,
+      height: 2_800,
+    });
+
+    expect(run.mock.calls[0]?.[0]).toBe("@cf/moondream/moondream3.1-9B-A2B");
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it("finds a bright receipt region against a dark background", () => {

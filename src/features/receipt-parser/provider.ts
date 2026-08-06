@@ -3,6 +3,8 @@ import type { AiReceiptOutput } from "@/domain/receipt/schemas";
 export type ReceiptImage = {
   mimeType: "image/jpeg" | "image/png" | "image/webp";
   base64: string;
+  width?: number;
+  height?: number;
 };
 
 export interface ReceiptParserProvider {

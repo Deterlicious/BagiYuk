@@ -6,6 +6,7 @@ Last updated: 6 August 2026
 ## Production follow-up: receipt extraction reliability
 
 - Replace the single Moondream request with a document-oriented Workers AI primary model and a lightweight fallback.
+- Route very tall, long-item receipts to the faster extraction attempt first while retaining the document model as fallback.
 - Request a smaller structured extraction shape, validate it with Zod, and derive editable confidence indicators deterministically.
 - Automatically crop, upscale, grayscale, and increase contrast for receipt photos before upload without persisting the image.
 - Increase the guarded inference timeout for long receipts and preserve retry/manual fallbacks.

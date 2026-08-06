@@ -120,8 +120,10 @@ export async function POST(request: Request) {
       provider.parse({
         mimeType: receipt.type as "image/jpeg" | "image/png" | "image/webp",
         base64: bytesToBase64(bytes),
+        width: dimensions.width,
+        height: dimensions.height,
       }),
-      55_000,
+      75_000,
     );
     return NextResponse.json({ receipt: normalizeAiReceipt(parsed), provider: provider.name });
   } catch (error) {

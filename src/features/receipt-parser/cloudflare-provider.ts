@@ -57,7 +57,10 @@ function extractPayload(response: unknown) {
 }
 
 function field<T>(value: T | null, confidence: number) {
-  return { value, confidence: value === null ? 0.12 : confidence };
+  return {
+    value,
+    confidence: value === null ? 0.12 : Math.round(confidence * 100) / 100,
+  };
 }
 
 function deriveValidatedOutput(
@@ -95,7 +98,22 @@ function deriveValidatedOutput(
     ? Math.min(0.95, baseConfidence + 0.1)
     : Math.max(0.45, baseConfidence - 0.18);
 
-  const { subtotal, tax, serviceCharge, discount, rounding, total } = receipt.summary;
+  const { subtotal, tax, serviceCharge, discount, total } = receipt.summary;
+  let rounding = receipt.summary.rounding;
+  let roundingWasInferred = false;
+  if (
+    subtotal !== null &&
+    tax !== null &&
+    serviceCharge !== null &&
+    discount !== null &&
+    total !== null
+  ) {
+    const inferredRounding = total - (subtotal + tax + serviceCharge - discount);
+    if ((rounding === null || rounding === 0) && inferredRounding !== 0 && Math.abs(inferredRounding) <= 1_000) {
+      rounding = inferredRounding;
+      roundingWasInferred = true;
+    }
+  }
   const totalMatches =
     subtotal !== null &&
     tax !== null &&
@@ -116,7 +134,7 @@ function deriveValidatedOutput(
       tax: field(tax, totalConfidence),
       serviceCharge: field(serviceCharge, totalConfidence),
       discount: field(discount, totalConfidence),
-      rounding: field(rounding, totalConfidence),
+      rounding: field(rounding, roundingWasInferred ? 0.68 : totalConfidence),
       total: field(total, totalConfidence),
     },
   });
@@ -173,10 +191,21 @@ export class CloudflareReceiptParserProvider implements ReceiptParserProvider {
   }
 
   async parse(image: ReceiptImage): Promise<AiReceiptOutput> {
-    const attempts = [
-      { run: () => this.runDocumentModel(image), confidence: 0.84 },
-      { run: () => this.runFallbackModel(image), confidence: 0.72 },
-    ];
+    const documentAttempt = {
+      run: () => this.runDocumentModel(image),
+      confidence: 0.84,
+    };
+    const fallbackAttempt = {
+      run: () => this.runFallbackModel(image),
+      confidence: 0.72,
+    };
+    const isTallReceipt =
+      typeof image.width === "number" &&
+      typeof image.height === "number" &&
+      image.height / image.width >= 2.1;
+    const attempts = isTallReceipt
+      ? [fallbackAttempt, documentAttempt]
+      : [documentAttempt, fallbackAttempt];
 
     for (const attempt of attempts) {
       try {
