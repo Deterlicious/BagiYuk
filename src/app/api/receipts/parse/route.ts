@@ -41,8 +41,13 @@ async function getProvider(): Promise<ReceiptParserProvider> {
   const model =
     (env as CloudflareEnv & { RECEIPT_AI_MODEL?: string }).RECEIPT_AI_MODEL ??
     process.env.RECEIPT_AI_MODEL ??
+    "@cf/google/gemma-4-26b-a4b-it";
+  const fallbackModel =
+    (env as CloudflareEnv & { RECEIPT_AI_FALLBACK_MODEL?: string })
+      .RECEIPT_AI_FALLBACK_MODEL ??
+    process.env.RECEIPT_AI_FALLBACK_MODEL ??
     "@cf/moondream/moondream3.1-9B-A2B";
-  return new CloudflareReceiptParserProvider(ai, model);
+  return new CloudflareReceiptParserProvider(ai, model, fallbackModel);
 }
 
 async function withTimeout<T>(promise: Promise<T>, milliseconds: number) {
@@ -116,7 +121,7 @@ export async function POST(request: Request) {
         mimeType: receipt.type as "image/jpeg" | "image/png" | "image/webp",
         base64: bytesToBase64(bytes),
       }),
-      25_000,
+      55_000,
     );
     return NextResponse.json({ receipt: normalizeAiReceipt(parsed), provider: provider.name });
   } catch (error) {

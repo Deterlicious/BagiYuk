@@ -15,7 +15,7 @@ Run `pnpm preview`. The script builds through OpenNext and starts Wrangler's loc
 
 1. Authenticate the Wrangler CLI with `pnpm wrangler login`.
 2. The `production` Wrangler environment supplies the `AI` binding and selects the Cloudflare provider. The default local environment deliberately has no remote binding, so `pnpm preview` remains credential-free.
-3. Optionally override `RECEIPT_AI_MODEL` in the production environment after checking the current model catalog.
+3. Production uses Gemma 4 vision for document OCR and Moondream as fallback. Optionally override `RECEIPT_AI_MODEL` or `RECEIPT_AI_FALLBACK_MODEL` after checking the current model catalog.
 4. Do not add API keys to `NEXT_PUBLIC_*` variables. Workers AI is accessed through the server-side binding.
 
 ## Deploy

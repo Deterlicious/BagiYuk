@@ -24,7 +24,7 @@ export default function HomePage() {
       <header className="mx-auto flex w-full max-w-[1160px] items-center justify-between px-5 py-5 sm:px-8 lg:px-10">
         <BrandMark />
         <Link
-          href="/split/new"
+          href="/split/new?fresh=1"
           className="rounded-lg px-3 py-2 text-sm font-bold text-brand-strong transition hover:bg-brand/8 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
         >
           Buka pembagi
@@ -45,7 +45,7 @@ export default function HomePage() {
           </p>
 
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link href="/split/new" className={buttonStyles({ className: "group min-w-52" })}>
+            <Link href="/split/new?fresh=1" className={buttonStyles({ className: "group min-w-52" })}>
               Mulai bagi tagihan
               <ArrowRight className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" size={18} />
             </Link>

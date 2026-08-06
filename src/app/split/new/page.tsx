@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 export default async function NewSplitPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sample?: string }>;
+  searchParams: Promise<{ fresh?: string; sample?: string }>;
 }) {
-  const { sample } = await searchParams;
-  return <SplitWizard initialSample={sample === "1"} />;
+  const { fresh, sample } = await searchParams;
+  return <SplitWizard initialSample={sample === "1"} startFresh={fresh === "1"} />;
 }

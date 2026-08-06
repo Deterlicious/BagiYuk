@@ -1,4 +1,4 @@
-const CACHE_NAME = "bagiyuk-shell-v1";
+const CACHE_NAME = "bagiyuk-shell-v2";
 const SHELL = ["/", "/split/new", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {

@@ -3,6 +3,15 @@
 Status: completed
 Last updated: 6 August 2026
 
+## Production follow-up: receipt extraction reliability
+
+- Replace the single Moondream request with a document-oriented Workers AI primary model and a lightweight fallback.
+- Request a smaller structured extraction shape, validate it with Zod, and derive editable confidence indicators deterministically.
+- Automatically crop, upscale, grayscale, and increase contrast for receipt photos before upload without persisting the image.
+- Increase the guarded inference timeout for long receipts and preserve retry/manual fallbacks.
+- Make homepage start actions explicit: a fresh split clears a stored sample/draft, while direct `/split/new` navigation may still resume a draft.
+- Add regression tests for provider response shapes, arithmetic confidence, and sample-to-fresh navigation.
+
 ## Scope
 
 Build a production-ready, mobile-first BagiYuk MVP that supports receipt image parsing as an optional enhancement and always provides a complete manual bill-splitting path. The product has no authentication, payment, accounting dashboard, or permanent receipt-image storage.

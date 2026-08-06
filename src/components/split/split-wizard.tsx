@@ -25,13 +25,28 @@ import { VerificationStep } from "./steps/verification-step";
 
 const stepLabels = ["Struk", "Periksa", "Anggota", "Bagikan", "Hasil"] as const;
 
-export function SplitWizard({ initialSample }: { initialSample: boolean }) {
+export function SplitWizard({
+  initialSample,
+  startFresh,
+}: {
+  initialSample: boolean;
+  startFresh: boolean;
+}) {
   const [state, dispatch] = useReducer(draftReducer, undefined, createEmptyDraft);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (initialSample) {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
       dispatch({ type: "hydrate", draft: createSampleDraft() });
+      window.history.replaceState({}, "", "/split/new");
+      queueMicrotask(() => setHydrated(true));
+      return;
+    }
+
+    if (startFresh) {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      dispatch({ type: "reset" });
       window.history.replaceState({}, "", "/split/new");
       queueMicrotask(() => setHydrated(true));
       return;
@@ -47,7 +62,7 @@ export function SplitWizard({ initialSample }: { initialSample: boolean }) {
       }
     }
     queueMicrotask(() => setHydrated(true));
-  }, [initialSample]);
+  }, [initialSample, startFresh]);
 
   useEffect(() => {
     if (!hydrated) return;

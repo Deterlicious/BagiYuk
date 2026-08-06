@@ -89,3 +89,64 @@ export const aiReceiptOutputSchema = z.object({
 });
 
 export type AiReceiptOutput = z.infer<typeof aiReceiptOutputSchema>;
+
+function parseModelInteger(value: unknown) {
+  if (value === null || typeof value === "number") return value;
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().replace(/[^\d-]/g, "");
+  if (!normalized || normalized === "-") return null;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : value;
+}
+
+const modelStringSchema = z
+  .preprocess(
+    (value) => (typeof value === "string" && value.trim() ? value.trim() : value),
+    z.string().max(120).nullable(),
+  )
+  .catch(null);
+
+const modelMoneySchema = z
+  .preprocess(parseModelInteger, editableMoneySchema.nullable())
+  .catch(null);
+
+const modelSignedMoneySchema = z
+  .preprocess(parseModelInteger, nullableSignedMoneyField.shape.value)
+  .catch(null);
+
+const modelQuantitySchema = z
+  .preprocess(
+    parseModelInteger,
+    z.number().int().min(1).max(999).nullable(),
+  )
+  .catch(null);
+
+/**
+ * Small, tolerant boundary for untrusted model JSON. Confidence is deliberately
+ * not requested from the model; the server derives it from presence and
+ * arithmetic consistency before returning editable data to the client.
+ */
+export const rawReceiptExtractionSchema = z.object({
+  merchantName: modelStringSchema,
+  items: z
+    .array(
+      z.object({
+        name: modelStringSchema,
+        quantity: modelQuantitySchema,
+        unitPrice: modelMoneySchema,
+        lineTotal: modelMoneySchema,
+      }),
+    )
+    .min(1)
+    .max(100),
+  summary: z.object({
+    subtotal: modelMoneySchema,
+    tax: modelMoneySchema,
+    serviceCharge: modelMoneySchema,
+    discount: modelMoneySchema,
+    rounding: modelSignedMoneySchema,
+    total: modelMoneySchema,
+  }),
+});
+
+export type RawReceiptExtraction = z.infer<typeof rawReceiptExtractionSchema>;

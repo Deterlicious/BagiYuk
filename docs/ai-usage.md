@@ -13,11 +13,18 @@ Provider selection is server-only through `RECEIPT_AI_PROVIDER`. No token, accou
 
 ## Model choice
 
-The production adapter defaults to `@cf/moondream/moondream3.1-9B-A2B`. Cloudflare's [model page](https://developers.cloudflare.com/ai/models/%40cf/moondream/moondream3.1-9B-A2B/) described it on 6 August 2026 as an active image-to-text model intended for OCR and structured output. It is newer and more task-specific than legacy Llama vision examples. Override it with `RECEIPT_AI_MODEL` only after checking the current official [Workers AI catalog](https://developers.cloudflare.com/workers-ai/models/).
+The production adapter uses two active open models behind the same Workers AI binding:
+
+- Primary: `@cf/google/gemma-4-26b-a4b-it`. Cloudflare documents Gemma 4 as supporting document/PDF parsing, multilingual OCR, variable image aspect ratios, and vision understanding.
+- Fallback: `@cf/moondream/moondream3.1-9B-A2B`, a smaller image-to-text model intended for OCR and structured output.
+
+The primary and fallback can be overridden server-side with `RECEIPT_AI_MODEL` and `RECEIPT_AI_FALLBACK_MODEL`. Check the current official [Workers AI catalog](https://developers.cloudflare.com/workers-ai/models/) before changing either model.
+
+PaddleOCR was evaluated because it is a strong Apache-licensed OCR project on GitHub, but its Python/native inference runtime does not run inside this OpenNext Worker. Adding it would require a separate container/server and a materially different deployment architecture. The current hybrid keeps the MVP serverless and uses no browser secret.
 
 ## Input and privacy
 
-- The browser re-encodes the selected photo as JPEG, caps its longest edge at 2,400 px, and strips embedded metadata through canvas before inference when browser APIs allow it. The original local preview is unchanged.
+- The browser detects likely receipt-paper bounds, crops excess background, upscales narrow receipts, applies grayscale/contrast enhancement, caps the longest edge at 3,200 px, and strips embedded metadata through canvas when browser APIs allow it. The original local preview is unchanged.
 - The parse route accepts JPEG, PNG, or WebP up to 8 MB and independently validates the actual image dimensions.
 - Parsing happens only after an explicit user action.
 - The image is held in request memory for inference and is not written to disk, object storage, logs, local storage, or a database.
@@ -26,7 +33,7 @@ The production adapter defaults to `@cf/moondream/moondream3.1-9B-A2B`. Cloudfla
 
 ## Structured output
 
-The prompt asks for Indonesian receipt fields, integer rupiah, `null` for unreadable values, per-field confidence, and JSON only. The server extracts the JSON payload, validates it with Zod, normalizes missing optional values, and returns a safe error on invalid model output. Values below the confidence threshold are marked **Periksa** in the editor.
+The prompt asks for Indonesian receipt fields, integer rupiah, `null` for unreadable values, and JSON only. The primary request also supplies a JSON Schema. The server accepts the documented Workers AI response shapes, validates/coerces safe integer fields with Zod, and derives field confidence from presence plus line/subtotal/total arithmetic consistency. Values below the confidence threshold are marked **Periksa** in the editor. AI values remain editable and are never split totals.
 
 ## Fallbacks
 

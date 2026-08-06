@@ -57,3 +57,15 @@ test("verification remains usable with 200% text sizing", async ({ page }) => {
   );
   expect(overflow).toBeLessThanOrEqual(1);
 });
+
+test("starting a new split clears a previously opened sample", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Coba data contoh" }).click();
+  await expect(page.getByText("Langkah 2 dari 5")).toBeVisible();
+  await page.getByRole("link", { name: "Kembali ke beranda" }).click();
+  await page.getByRole("link", { name: "Mulai bagi tagihan" }).click();
+
+  await expect(page.getByText("Langkah 1 dari 5")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Mulai dari foto atau isi sendiri." })).toBeVisible();
+  await expect(page.getByLabel("Nama item", { exact: true })).toHaveCount(0);
+});
