@@ -9,20 +9,13 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "RECEIPT_AI_PROVIDER": "mock",
-    "RECEIPT_AI_MODEL": "@cf/google/gemma-4-26b-a4b-it",
-    "RECEIPT_AI_FALLBACK_MODEL": "@cf/moondream/moondream3.1-9B-A2B"
+    "RECEIPT_AI_PROVIDER": "mock"
   },
   "env": {
     "production": {
       "name": "bagiyuk",
-      "ai": {
-        "binding": "AI"
-      },
       "vars": {
-        "RECEIPT_AI_PROVIDER": "cloudflare",
-        "RECEIPT_AI_MODEL": "@cf/google/gemma-4-26b-a4b-it",
-        "RECEIPT_AI_FALLBACK_MODEL": "@cf/moondream/moondream3.1-9B-A2B"
+        "RECEIPT_AI_PROVIDER": "mock"
       }
     }
   },

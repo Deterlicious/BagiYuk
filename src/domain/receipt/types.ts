@@ -26,5 +26,5 @@ export type EditableReceipt = {
   items: EditableReceiptItem[];
   charges: ReceiptCharges;
   chargeConfidence: ReceiptChargeConfidence;
-  source: "manual" | "sample" | "ai";
+  source: "manual" | "sample" | "ai" | "ocr";
 };

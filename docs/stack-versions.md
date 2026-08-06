@@ -13,6 +13,7 @@ Verified against the npm registry on 6 August 2026. All selected releases are st
 | Lucide React | 1.29.0 | Current stable icon set. |
 | Motion | 13.0.0 | Current stable; limited to wizard state transitions. |
 | Plus Jakarta Sans (Fontsource variable) | 5.3.0 | Stable self-hosted font source, bundled through `next/font/local`. |
+| PaddleOCR.js | 0.4.2 | Stable Apache-2.0 browser runtime for local PP-OCRv6 inference. |
 | Zod | 4.4.3 | Current stable validation boundary. |
 | OpenNext Cloudflare | 1.20.2 | Supports Next.js `>=16.2.11`; paired with 16.3.0. |
 | Wrangler | 4.119.0 | Current stable Cloudflare CLI. |

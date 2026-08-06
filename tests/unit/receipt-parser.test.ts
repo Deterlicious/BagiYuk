@@ -2,10 +2,32 @@ import { describe, expect, it, vi } from "vitest";
 import { normalizeAiReceipt } from "@/domain/receipt/normalize";
 import { CloudflareReceiptParserProvider } from "@/features/receipt-parser/cloudflare-provider";
 import { MockReceiptParserProvider } from "@/features/receipt-parser/mock-provider";
+import {
+  groupOcrLinesIntoRows,
+  receiptFromOcrLines,
+  type OcrLine,
+} from "@/features/receipt-parser/paddle-receipt-parser";
 import { findReceiptBounds } from "@/lib/image-client";
 import { getImageDimensions } from "@/lib/image";
 
 describe("receipt parser boundary", () => {
+  const ocrLine = (
+    text: string,
+    top: number,
+    left = 20,
+    right = 800,
+    score = 0.96,
+  ): OcrLine => ({
+    text,
+    score,
+    poly: [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: top + 24 },
+      { x: left, y: top + 24 },
+    ],
+  });
+
   it("normalizes deterministic mock output into editable integer rupiah", async () => {
     const raw = await new MockReceiptParserProvider().parse({
       mimeType: "image/png",
@@ -157,5 +179,79 @@ describe("receipt parser boundary", () => {
     expect(bounds).not.toBeNull();
     expect(bounds?.x).toBeLessThanOrEqual(28);
     expect(bounds?.width).toBeGreaterThanOrEqual(44);
+  });
+
+  it("groups split OCR fragments and parses the simple sushi receipt exactly", () => {
+    const lines = [
+      ocrLine("SUSHI IPPACHI RESTAURANT", 10),
+      ocrLine("1", 70, 20, 45),
+      ocrLine("CHIRASHI SPECIAL SUSHI", 70, 70, 520),
+      ocrLine("580,000", 70, 650, 800),
+      ocrLine("1 OCHA REFILL 10,000", 110),
+      ocrLine("Subtotal 590,000", 180),
+      ocrLine("Service charge 41,300", 220),
+      ocrLine("Tax1 63,130", 260),
+      ocrLine("Tota1", 300, 20, 180),
+      ocrLine("694,500", 326, 650, 800),
+    ];
+
+    expect(groupOcrLinesIntoRows(lines)[1]?.text).toBe("1 CHIRASHI SPECIAL SUSHI 580,000");
+    const receipt = receiptFromOcrLines(lines);
+
+    expect(receipt.source).toBe("ocr");
+    expect(receipt.merchantName).toBe("SUSHI IPPACHI RESTAURANT");
+    expect(receipt.items).toMatchObject([
+      { name: "CHIRASHI SPECIAL SUSHI", quantity: 1, unitPrice: 580_000, lineTotal: 580_000 },
+      { name: "OCHA REFILL", quantity: 1, unitPrice: 10_000, lineTotal: 10_000 },
+    ]);
+    expect(receipt.charges).toEqual({
+      statedSubtotal: 590_000,
+      tax: 63_130,
+      serviceCharge: 41_300,
+      discount: 0,
+      rounding: 70,
+      receiptTotal: 694_500,
+    });
+  });
+
+  it("parses Indonesian long-receipt item rows and OCR digit confusions", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("=CHECKING=", 10, 20, 220),
+      ocrLine("RESTO PAGI SORE BSD", 35, 20, 700, 0.92),
+      ocrLine("6 BUAH SUNKIST", 80, 20, 400),
+      ocrLine("198,OOO", 86, 650, 800),
+      ocrLine("27 SRIKAYA", 120, 20, 400),
+      ocrLine("297.OOO", 126, 650, 800),
+      ocrLine("40 NASI PUTIH", 160, 20, 400),
+      ocrLine("SPECIAL", 178, 65, 230),
+      ocrLine("520,000", 166, 650, 800),
+      ocrLine("Subtotal", 240, 20, 250),
+      ocrLine("1,015,000", 246, 650, 800),
+      ocrLine("Tax", 280, 20, 250),
+      ocrLine("101,500", 286, 650, 800),
+      ocrLine("Total", 320, 20, 250),
+      ocrLine("1,116,500", 326, 650, 800),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "BUAH SUNKIST", quantity: 6, unitPrice: 33_000, lineTotal: 198_000 },
+      { name: "SRIKAYA", quantity: 27, unitPrice: 11_000, lineTotal: 297_000 },
+      { name: "NASI PUTIH SPECIAL", quantity: 40, unitPrice: 13_000, lineTotal: 520_000 },
+    ]);
+    expect(receipt.merchantName).toBe("RESTO PAGI SORE BSD");
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 1_015_000,
+      tax: 101_500,
+      receiptTotal: 1_116_500,
+    });
+  });
+
+  it("rejects OCR output that contains no editable item rows", () => {
+    expect(() =>
+      receiptFromOcrLines([
+        ocrLine("THANK YOU", 10),
+        ocrLine("Total 123,000", 50),
+      ]),
+    ).toThrow("ocr_no_items");
   });
 });

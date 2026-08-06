@@ -5,11 +5,12 @@ Last updated: 6 August 2026
 
 ## Production follow-up: receipt extraction reliability
 
-- Replace the single Moondream request with a document-oriented Workers AI primary model and a lightweight fallback.
-- Route very tall, long-item receipts to the faster extraction attempt first while retaining the document model as fallback.
-- Request a smaller structured extraction shape, validate it with Zod, and derive editable confidence indicators deterministically.
-- Automatically crop, upscale, grayscale, and increase contrast for receipt photos before upload without persisting the image.
-- Increase the guarded inference timeout for long receipts and preserve retry/manual fallbacks.
+- Replace remote vision-LLM extraction with the pretrained PP-OCRv6 Indonesian/Latin model through PaddleOCR.js.
+- Run detection and recognition locally in a browser Web Worker/WASM so receipt images never leave the device.
+- Group OCR fragments by geometry, parse Indonesian item/summary rows deterministically, validate with Zod, and preserve editable confidence indicators.
+- Automatically crop, upscale, grayscale, and increase contrast for receipt photos before local inference without persisting the image.
+- Preserve retry/manual fallbacks when models cannot download or a receipt layout cannot be parsed.
+- Remove the Cloudflare Workers AI binding from production while retaining the mock/provider boundary for tests and optional future use.
 - Make homepage start actions explicit: a fresh split clears a stored sample/draft, while direct `/split/new` navigation may still resume a draft.
 - Add regression tests for provider response shapes, arithmetic confidence, and sample-to-fresh navigation.
 
@@ -42,12 +43,12 @@ Build a production-ready, mobile-first BagiYuk MVP that supports receipt image p
 - Autosave structured draft data in local storage without persisting the receipt image.
 - Use sticky mobile actions, clear inline errors, Indonesian copy, and responsive desktop summaries.
 
-### 4. OCR/AI enhancement
+### 4. OCR enhancement
 
-- Add a server-only receipt-parser provider interface, deterministic mock provider, and Cloudflare Workers AI implementation.
-- Validate upload type and size, request strict JSON from a current non-deprecated vision model, normalize the response, and validate it with Zod.
+- Add an on-device PaddleOCR.js/PP-OCRv6 engine plus a deterministic mock/server provider boundary.
+- Preprocess the selected image, group detected text by geometry, parse integer-rupiah rows, and validate editable output with Zod.
 - Surface low-confidence fields for review, parsing progress, retry, safe errors, and manual fallback.
-- Never allow AI to calculate the final split or expose credentials to the client.
+- Never allow OCR to calculate the final split or introduce browser credentials.
 
 ### 5. PWA, accessibility, sharing, and polish
 
@@ -69,7 +70,7 @@ Build a production-ready, mobile-first BagiYuk MVP that supports receipt image p
 - Persist only normalized draft JSON in local storage; keep selected image data in memory and discard it on reload/reset.
 - Make the pure domain calculator the only source of split totals. The UI and AI layer provide inputs but never calculate money independently.
 - Treat the entered receipt total as a reconciliation reference. Allocations use the sum of verified items plus explicit charges, preserving any mismatch for correction.
-- Keep provider selection server-side through environment bindings: mock by default, Cloudflare Workers AI only when configured.
+- Keep the optional server provider on mock by default; production OCR is credential-free and runs in the browser.
 
 ## Definition of done
 
@@ -83,14 +84,16 @@ Build a production-ready, mobile-first BagiYuk MVP that supports receipt image p
 Completed on 6 August 2026:
 
 - Strict TypeScript and ESLint pass without source warnings.
-- 19 Vitest tests pass across deterministic billing, conservation, AI normalization, and image-header validation.
-- Four Playwright checks pass: the full journey on 390×844 and desktop, plus 200% text-size reflow on both viewports.
+- 26 Vitest checks pass, including deterministic billing, provider boundaries, OCR geometry/column parsing, Indonesian rupiah normalization, and image preprocessing.
+- Six Playwright checks pass: the full journey on 390×844 and desktop, 200% text-size reflow, and the sample-to-fresh-start regression on both viewports.
 - Next.js production build completes with a self-hosted Plus Jakarta Sans variable font.
-- OpenNext builds the Worker bundle and `pnpm preview` starts Wrangler `workerd`; homepage, manifest, and multipart mock parse return HTTP 200.
+- OpenNext builds the Worker bundle and `pnpm preview` starts Wrangler `workerd`; homepage, manifest, and fresh split route return HTTP 200.
+- Browser OCR was verified against two supplied real receipts: the simple receipt produced 2/2 exact item rows and a reconciled Rp694.500 total; the long receipt produced 45/45 item rows whose sum exactly matches the Rp7.476.000 printed subtotal and Rp8.223.600 total.
 - Homepage and verification screens were visually inspected from the generated mobile and desktop captures.
 
 ## Known MVP limitations
 
-- Real Workers AI inference was not executed because no Cloudflare credential/account binding was supplied; the production provider boundary is complete and the credential-free mock path was tested.
+- The first OCR scan downloads roughly 31 MB of model files and therefore needs an internet connection; the complete manual flow remains available without it.
+- Unusual receipt layouts, faint thermal print, glare, or severely cropped images can still require manual correction.
 - Parse rate limiting is best effort per Worker isolate rather than distributed.
 - Offline shell behavior is implemented but not included in the automated browser suite.

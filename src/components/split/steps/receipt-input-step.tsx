@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { editableReceiptSchema } from "@/domain/receipt/schemas";
 import type { EditableReceipt } from "@/domain/receipt/types";
-import { prepareReceiptImage } from "@/lib/image-client";
+import { parseReceiptInBrowser } from "@/features/receipt-parser/paddle-client";
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -23,7 +23,9 @@ export function ReceiptInputStep({
   const galleryRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "preparing" | "reading" | "finishing">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "preparing" | "loading-model" | "reading" | "finishing"
+  >("idle");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -63,17 +65,9 @@ export function ReceiptInputStep({
     setStatus("preparing");
 
     try {
-      const preparedFile = await prepareReceiptImage(file);
-      const form = new FormData();
-      form.append("receipt", preparedFile);
-      setStatus("reading");
-      const response = await fetch("/api/receipts/parse", { method: "POST", body: form });
-      const payload: unknown = await response.json();
-      if (!response.ok) throw new Error("parse_failed");
+      const parsed = await parseReceiptInBrowser(file, setStatus);
       setStatus("finishing");
-      const receipt = editableReceiptSchema.parse(
-        (payload as { receipt?: unknown }).receipt,
-      );
+      const receipt = editableReceiptSchema.parse(parsed);
       onParsed(receipt);
     } catch {
       setStatus("idle");
@@ -85,6 +79,8 @@ export function ReceiptInputStep({
   const statusLabel =
     status === "preparing"
       ? "Menyiapkan foto…"
+      : status === "loading-model"
+        ? "Menyiapkan model OCR di perangkat…"
       : status === "reading"
         ? "Membaca item dan harga…"
         : status === "finishing"
@@ -99,7 +95,7 @@ export function ReceiptInputStep({
           Mulai dari foto atau isi sendiri.
         </h1>
         <p className="mt-3 text-base leading-7 text-muted">
-          Scan membantu mengetik ulang, tetapi kamu tetap memeriksa semua angka sebelum dibagikan.
+          OCR berjalan langsung di perangkat untuk membantu mengetik ulang. Kamu tetap memeriksa semua angka sebelum dibagikan.
         </p>
       </div>
 
@@ -214,7 +210,7 @@ export function ReceiptInputStep({
       <aside className="mt-5 flex gap-3 rounded-2xl border border-line bg-[#f1ecdf] p-4 text-sm leading-6 text-muted">
         <Info className="mt-0.5 shrink-0 text-brand" aria-hidden="true" size={19} />
         <p>
-          <strong className="text-ink">Supaya mudah dibaca:</strong> ratakan struk, cari cahaya terang, dan pastikan total tidak terpotong.
+          <strong className="text-ink">Supaya mudah dibaca:</strong> ratakan struk, cari cahaya terang, dan pastikan total tidak terpotong. Pemindaian pertama mengunduh model OCR sekitar 31 MB.
         </p>
       </aside>
     </section>

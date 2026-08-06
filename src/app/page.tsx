@@ -60,7 +60,7 @@ export default function HomePage() {
           <div className="mt-9 flex max-w-[620px] items-start gap-3 border-t border-dashed border-line pt-5 text-sm leading-6 text-muted">
             <LockKeyhole className="mt-0.5 shrink-0 text-brand" aria-hidden="true" size={18} />
             <p>
-              Gambar struk diproses hanya untuk membuat pembagian dan tidak disimpan permanen di versi ini.
+              Gambar struk diproses langsung di perangkatmu, tidak diunggah, dan tidak disimpan permanen.
             </p>
           </div>
         </div>

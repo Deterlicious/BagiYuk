@@ -37,7 +37,7 @@ export const editableReceiptSchema = z.object({
     rounding: confidenceSchema,
     receiptTotal: confidenceSchema,
   }),
-  source: z.enum(["manual", "sample", "ai"]),
+  source: z.enum(["manual", "sample", "ai", "ocr"]),
 });
 
 const nullableStringField = z.object({

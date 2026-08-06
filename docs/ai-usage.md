@@ -1,42 +1,41 @@
-# Receipt AI usage
+# Receipt OCR usage
 
 ## Boundary
 
-AI only turns a user-selected receipt image into editable structured input. It never assigns items, allocates fees, or determines a person's final total. The deterministic calculator in `src/domain/billing` remains the only source of split totals.
+OCR only turns a user-selected receipt image into editable structured input. It never assigns items, allocates fees, or determines a person's final total. The deterministic calculator in `src/domain/billing` remains the only source of split totals.
 
-## Providers
+## Production engine
 
-- `mock` is the default provider for local development, automated tests, and deployments without AI credentials. It returns deterministic sample receipt data.
-- `cloudflare` uses the server-side Workers AI binding named `AI`.
+BagiYuk uses the stable `@paddleocr/paddleocr-js` package with the pretrained PP-OCRv6 Indonesian/Latin model. The runtime performs text detection and recognition in the browser through a Web Worker and ONNX Runtime Web/WASM. The WASM-only bundle keeps every static asset below Cloudflare Workers' 25 MiB limit and works consistently across mobile browsers.
 
-Provider selection is server-only through `RECEIPT_AI_PROVIDER`. No token, account identifier, or API key is sent to the browser.
+- No Cloudflare Workers AI binding or API key is required.
+- The Paddle detection and recognition models total about 31 MB and are downloaded on the first scan, then reused from the browser cache.
+- The package is loaded dynamically only after the user presses **Baca struk**, so it does not increase the homepage's initial JavaScript path.
+- OCR returns text, polygons, and confidence scores. BagiYuk groups fragments into visual rows and parses Indonesian rupiah deterministically.
 
-## Model choice
-
-The production adapter uses two active open models behind the same Workers AI binding:
-
-- Primary: `@cf/google/gemma-4-26b-a4b-it`. Cloudflare documents Gemma 4 as supporting document/PDF parsing, multilingual OCR, variable image aspect ratios, and vision understanding.
-- Fallback: `@cf/moondream/moondream3.1-9B-A2B`, a smaller image-to-text model intended for OCR and structured output.
-
-Normal receipts use Gemma first. Very tall receipts use the faster Moondream extraction first so a long item list does not spend the entire request budget waiting for the larger model; Gemma remains the second attempt.
-
-The primary and fallback can be overridden server-side with `RECEIPT_AI_MODEL` and `RECEIPT_AI_FALLBACK_MODEL`. Check the current official [Workers AI catalog](https://developers.cloudflare.com/workers-ai/models/) before changing either model.
-
-PaddleOCR was evaluated because it is a strong Apache-licensed OCR project on GitHub, but its Python/native inference runtime does not run inside this OpenNext Worker. Adding it would require a separate container/server and a materially different deployment architecture. The current hybrid keeps the MVP serverless and uses no browser secret.
+The existing server provider interface and deterministic mock provider remain available for tests and future optional integrations. Production deliberately selects `mock` for that unused endpoint and has no `AI` binding.
 
 ## Input and privacy
 
 - The browser detects likely receipt-paper bounds, crops excess background, upscales narrow receipts, applies grayscale/contrast enhancement, caps the longest edge at 3,200 px, and strips embedded metadata through canvas when browser APIs allow it. The original local preview is unchanged.
-- The parse route accepts JPEG, PNG, or WebP up to 8 MB and independently validates the actual image dimensions.
-- Parsing happens only after an explicit user action.
-- The image is held in request memory for inference and is not written to disk, object storage, logs, local storage, or a database.
+- Parsing starts only after an explicit user action.
+- The receipt image and OCR inference remain on the user's device. They are not posted to the BagiYuk Worker, written to storage, logged, or placed in local storage.
 - The browser preview is an in-memory object URL and is revoked when replaced or removed.
-- The service worker never caches parse requests or receipt images.
+- The service worker never caches receipt image requests.
 
 ## Structured output
 
-The prompt asks for Indonesian receipt fields, integer rupiah, `null` for unreadable values, and JSON only. The primary request also supplies a JSON Schema. The server accepts the documented Workers AI response shapes, validates/coerces safe integer fields with Zod, and derives field confidence from presence plus line/subtotal/total arithmetic consistency. Values below the confidence threshold are marked **Periksa** in the editor. AI values remain editable and are never split totals.
+OCR fragments are untrusted input. The deterministic parser:
+
+- groups fragments by their detected coordinates;
+- recognizes quantity, item name, and trailing rupiah amount;
+- extracts subtotal, tax, service, discount, rounding, and total labels;
+- preserves all rupiah values as safe integers;
+- validates the final editable receipt with Zod; and
+- exposes low-confidence fields as **Periksa**.
+
+When a line total divides evenly by its quantity, the unit price is derived exactly. Otherwise the verified line total remains authoritative for that editable item. Small rounding differences can be inferred from the receipt total, but every field remains editable and the billing domain independently reconciles the final allocation.
 
 ## Fallbacks
 
-If AI is absent, slow, rate-limited, or invalid, the selected preview remains visible and the user can retry or continue with **Masukkan manual**. The entire verification, assignment, calculation, and sharing journey is network-independent.
+If the model cannot download, the browser lacks required WASM support, or OCR finds no item rows, the selected preview remains visible and the user can retry or continue with **Masukkan manual**. The sample-data and complete manual split journeys remain usable without OCR.
