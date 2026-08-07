@@ -1,14 +1,36 @@
 "use client";
 
-import { Camera, FileImage, ImagePlus, Info, LoaderCircle, RotateCw, Sparkles, X } from "lucide-react";
+import {
+  Camera,
+  Check,
+  Circle,
+  Clock3,
+  FileImage,
+  ImagePlus,
+  Info,
+  LoaderCircle,
+  RotateCw,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { editableReceiptSchema } from "@/domain/receipt/schemas";
 import type { EditableReceipt } from "@/domain/receipt/types";
-import { parseReceiptInBrowser } from "@/features/receipt-parser/paddle-client";
+import {
+  cancelReceiptParsing,
+  parseReceiptInBrowser,
+  type ReceiptScanStage,
+} from "@/features/receipt-parser/paddle-client";
+import {
+  receiptScanStages,
+  scanErrorMessage,
+  scanStageIndex,
+  validateReceiptFile,
+} from "@/features/receipt-parser/receipt-scan";
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
-const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const SCAN_TIMEOUT_MS = 120_000;
 
 export function ReceiptInputStep({
   onManual,
@@ -21,11 +43,11 @@ export function ReceiptInputStep({
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
+  const scanControllerRef = useRef<AbortController | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<
-    "idle" | "preparing" | "loading-model" | "reading" | "finishing"
-  >("idle");
+  const [status, setStatus] = useState<"idle" | ReceiptScanStage>("idle");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -34,58 +56,115 @@ export function ReceiptInputStep({
     };
   }, [previewUrl]);
 
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setInterval(() => setElapsedSeconds((value) => value + 1), 1_000);
+    return () => window.clearInterval(timer);
+  }, [status]);
+
+  useEffect(() => {
+    return () => {
+      if (!scanControllerRef.current) return;
+      scanControllerRef.current.abort("unmount");
+      scanControllerRef.current = null;
+      void cancelReceiptParsing();
+    };
+  }, []);
+
   function chooseFile(selectedFile?: File) {
     if (!selectedFile) return;
     setError("");
-    if (!acceptedTypes.has(selectedFile.type)) {
-      setError("Gunakan foto JPG, PNG, atau WebP.");
-      return;
-    }
-    if (selectedFile.size > MAX_FILE_SIZE) {
-      setError("Ukuran foto maksimal 8 MB. Coba perkecil atau ambil foto baru.");
+    const validationError = validateReceiptFile(selectedFile, MAX_FILE_SIZE);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(selectedFile);
     setPreviewUrl(URL.createObjectURL(selectedFile));
+    void parseReceipt(selectedFile);
   }
 
   function removeFile() {
+    if (scanControllerRef.current) {
+      scanControllerRef.current.abort("removed");
+      scanControllerRef.current = null;
+      void cancelReceiptParsing();
+    }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(null);
     setPreviewUrl(null);
+    setStatus("idle");
+    setElapsedSeconds(0);
     setError("");
     if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
   }
 
-  async function parseReceipt() {
-    if (!file || status !== "idle") return;
+  async function parseReceipt(selectedFile = file) {
+    if (!selectedFile || scanControllerRef.current) return;
+    const controller = new AbortController();
+    scanControllerRef.current = controller;
     setError("");
+    setElapsedSeconds(0);
     setStatus("preparing");
+    let timeout = 0;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeout = window.setTimeout(() => {
+        controller.abort("timeout");
+        reject(new DOMException("Receipt scan timed out", "AbortError"));
+      }, SCAN_TIMEOUT_MS);
+    });
 
     try {
-      const parsed = await parseReceiptInBrowser(file, setStatus);
-      setStatus("finishing");
+      const parsed = await Promise.race([
+        parseReceiptInBrowser(
+          selectedFile,
+          (nextStatus) => {
+            if (!controller.signal.aborted) setStatus(nextStatus);
+          },
+          controller.signal,
+        ),
+        timeoutPromise,
+      ]);
       const receipt = editableReceiptSchema.parse(parsed);
+      controller.signal.throwIfAborted();
+      scanControllerRef.current = null;
       onParsed(receipt);
-    } catch {
+    } catch (scanError) {
+      if (scanControllerRef.current === controller) scanControllerRef.current = null;
       setStatus("idle");
-      setError("Struk belum berhasil dibaca. Foto tetap tersimpan di layar—coba lagi atau lanjut manual.");
+      if (["removed", "unmount", "user"].includes(String(controller.signal.reason))) return;
+      if (controller.signal.reason === "timeout") {
+        void cancelReceiptParsing();
+        setError("Pemindaian melewati 2 menit dan dihentikan. Coba lagi dengan foto lebih kecil atau lanjutkan manual.");
+        return;
+      }
+      setError(scanErrorMessage(scanError, navigator.onLine));
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
 
+  function cancelScan(reason: "user" | "manual" = "user") {
+    scanControllerRef.current?.abort(reason);
+    scanControllerRef.current = null;
+    setStatus("idle");
+    setElapsedSeconds(0);
+    if (reason === "user") {
+      setError("Pemindaian dibatalkan. Foto masih tersedia untuk dicoba lagi atau diganti.");
+    }
+    void cancelReceiptParsing();
+  }
+
+  function continueManually() {
+    cancelScan("manual");
+    onManual();
+  }
+
   const isParsing = status !== "idle";
-  const statusLabel =
-    status === "preparing"
-      ? "Menyiapkan foto…"
-      : status === "loading-model"
-        ? "Menyiapkan model OCR di perangkat…"
-      : status === "reading"
-        ? "Membaca item dan harga…"
-        : status === "finishing"
-          ? "Merapikan hasil…"
-          : "";
+  const activeStageIndex = status === "idle" ? -1 : scanStageIndex(status);
+  const activeStage = activeStageIndex >= 0 ? receiptScanStages[activeStageIndex] : null;
 
   return (
     <section className="mx-auto max-w-[820px]">
@@ -106,6 +185,7 @@ export function ReceiptInputStep({
               {/* A user-selected blob URL stays in memory and is never persisted. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={previewUrl} alt="Pratinjau foto struk" className="max-h-[460px] w-full object-contain" />
+              {isParsing && <span className="scan-line" aria-hidden="true" />}
               {!isParsing && (
                 <button
                   type="button"
@@ -120,32 +200,86 @@ export function ReceiptInputStep({
 
             <div aria-live="polite" className="mt-5">
               {isParsing ? (
-                <div className="flex min-h-14 items-center gap-3 rounded-xl border border-brand/20 bg-brand/5 px-4 text-sm font-bold text-brand-strong">
-                  <LoaderCircle className="animate-spin" aria-hidden="true" size={20} />
-                  {statusLabel}
-                </div>
-              ) : (
-                <Button className="w-full" onClick={parseReceipt}>
-                  <Sparkles aria-hidden="true" size={19} />
-                  Baca struk
-                </Button>
-              )}
-            </div>
+                <div className="overflow-hidden rounded-2xl border border-brand/20 bg-brand/5" role="status">
+                  <div className="flex items-start gap-3 px-4 pt-4 sm:px-5 sm:pt-5">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand text-white">
+                      <LoaderCircle className="animate-spin" aria-hidden="true" size={21} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-extrabold text-brand-strong">{activeStage?.label}…</p>
+                        <span className="price inline-flex items-center gap-1.5 text-xs font-bold text-muted">
+                          <Clock3 aria-hidden="true" size={14} />
+                          {elapsedSeconds} detik
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm leading-6 text-muted">{activeStage?.detail}</p>
+                    </div>
+                  </div>
 
-            {error && (
-              <div className="mt-4 rounded-xl border border-danger/25 bg-red-50 p-4" role="alert">
-                <p className="text-sm leading-6 font-bold text-danger">{error}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button variant="secondary" size="small" onClick={parseReceipt}>
-                    <RotateCw aria-hidden="true" size={16} />
-                    Coba scan lagi
-                  </Button>
-                  <Button variant="ghost" size="small" onClick={onManual}>
-                    Masukkan manual
-                  </Button>
+                  <div
+                    className="mx-4 mt-4 h-2 overflow-hidden rounded-full bg-brand/10 sm:mx-5"
+                    role="progressbar"
+                    aria-label="Tahap pemindaian struk"
+                    aria-valuemin={1}
+                    aria-valuemax={receiptScanStages.length}
+                    aria-valuenow={activeStageIndex + 1}
+                    aria-valuetext={`${activeStage?.label ?? "Memindai"}, tahap ${activeStageIndex + 1} dari ${receiptScanStages.length}`}
+                  >
+                    <span
+                      className="block h-full rounded-full bg-brand transition-[width] duration-500"
+                      style={{ width: `${((activeStageIndex + 1) / receiptScanStages.length) * 100}%` }}
+                    />
+                  </div>
+
+                  <ol className="grid gap-2 px-4 py-4 sm:grid-cols-2 sm:px-5">
+                    {receiptScanStages.map((scanStage, index) => {
+                      const isComplete = index < activeStageIndex;
+                      const isActive = index === activeStageIndex;
+                      return (
+                        <li
+                          key={scanStage.id}
+                          className={`flex items-center gap-2 text-xs font-bold ${
+                            isActive ? "text-brand-strong" : isComplete ? "text-success" : "text-muted/65"
+                          }`}
+                        >
+                          {isComplete ? (
+                            <Check aria-hidden="true" size={16} />
+                          ) : isActive ? (
+                            <LoaderCircle className="animate-spin" aria-hidden="true" size={16} />
+                          ) : (
+                            <Circle aria-hidden="true" size={14} />
+                          )}
+                          {scanStage.label}
+                        </li>
+                      );
+                    })}
+                  </ol>
+
+                  {elapsedSeconds >= 8 && (
+                    <p className="border-t border-brand/15 px-4 py-3 text-xs leading-5 text-muted sm:px-5">
+                      Aplikasi masih bekerja. Scan pertama lebih lama karena mesin OCR diunduh sekali; scan berikutnya biasanya lebih cepat.
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 border-t border-brand/15 px-4 py-3 sm:px-5">
+                    <Button variant="ghost" size="small" onClick={() => cancelScan()}>
+                      Batalkan scan
+                    </Button>
+                    {elapsedSeconds >= 12 && (
+                      <Button variant="secondary" size="small" onClick={continueManually}>
+                        Isi manual saja
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : !error ? (
+                <Button className="w-full" onClick={() => void parseReceipt()}>
+                  <Sparkles aria-hidden="true" size={19} />
+                  Coba baca lagi
+                </Button>
+              ) : null}
+            </div>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -155,7 +289,10 @@ export function ReceiptInputStep({
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={(event) => chooseFile(event.target.files?.[0])}
+              onChange={(event) => {
+                chooseFile(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
               aria-label="Ambil foto struk"
             />
             <input
@@ -163,7 +300,10 @@ export function ReceiptInputStep({
               className="sr-only"
               type="file"
               accept="image/*"
-              onChange={(event) => chooseFile(event.target.files?.[0])}
+              onChange={(event) => {
+                chooseFile(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
               aria-label="Pilih foto struk dari galeri"
             />
 
@@ -203,6 +343,26 @@ export function ReceiptInputStep({
               <Sparkles aria-hidden="true" size={18} />
               Pakai data contoh
             </Button>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-danger/25 bg-red-50 p-4" role="alert">
+            <p className="text-sm leading-6 font-bold text-danger">{error}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {file && (
+                <Button variant="secondary" size="small" onClick={() => void parseReceipt()}>
+                  <RotateCw aria-hidden="true" size={16} />
+                  Coba scan lagi
+                </Button>
+              )}
+              <Button variant="ghost" size="small" onClick={file ? removeFile : () => galleryRef.current?.click()}>
+                {file ? "Ganti foto" : "Pilih foto lain"}
+              </Button>
+              <Button variant="ghost" size="small" onClick={continueManually}>
+                Masukkan manual
+              </Button>
+            </div>
           </div>
         )}
       </div>

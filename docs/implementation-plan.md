@@ -1,7 +1,18 @@
 # BagiYuk MVP Implementation Plan
 
 Status: completed
-Last updated: 6 August 2026
+Last updated: 7 August 2026
+
+## Production follow-up: scan feedback and first-run performance
+
+- Start OCR automatically as soon as a valid camera/gallery image is selected so the upload action has an immediate, predictable result.
+- Keep validation errors visible even when no preview can be created, including files with missing browser MIME metadata.
+- Replace the single spinner with an accessible staged scan panel that explains preparation, engine loading, text recognition, and result assembly while showing elapsed time.
+- Offer cancel, retry, replace-photo, and manual-entry exits without persisting or uploading the receipt image.
+- Add a bounded timeout and distinguish offline/model-load failures from receipts whose text cannot be structured.
+- Match the ONNX Runtime WebAssembly binary version to the installed runtime and enable automatic multi-threading when cross-origin isolation is available.
+- Add the required COOP/COEP response headers and regression coverage for file validation and scan-progress behavior.
+- Re-run the full quality gates and manually verify the upload/scan experience at mobile and desktop viewports before deployment.
 
 ## Production follow-up: receipt extraction reliability
 
@@ -90,6 +101,15 @@ Completed on 6 August 2026:
 - OpenNext builds the Worker bundle and `pnpm preview` starts Wrangler `workerd`; homepage, manifest, and fresh split route return HTTP 200.
 - Browser OCR was verified against two supplied real receipts: the simple receipt produced 2/2 exact item rows and a reconciled Rp694.500 total; the long receipt produced 45/45 item rows whose sum exactly matches the Rp7.476.000 printed subtotal and Rp8.223.600 total.
 - Homepage and verification screens were visually inspected from the generated mobile and desktop captures.
+
+Production scan UX follow-up completed on 7 August 2026:
+
+- A valid camera/gallery selection now starts OCR immediately and exposes preparation, engine loading, recognition, and result-assembly stages with elapsed time.
+- Invalid uploads always show an actionable error; missing MIME metadata falls back safely to the supported file extension.
+- Cancellation, retry, replacement, manual fallback, differentiated offline/model/parser failures, and a two-minute timeout were manually verified.
+- The simple supplied receipt still parsed to two exact rows and a reconciled Rp694.500 total after the runtime change.
+- ONNX Runtime uses the matching 1.27.0 WASM binary and automatic conservative threading when COOP/COEP makes the page cross-origin isolated.
+- 29 Vitest checks and eight Playwright scenarios pass across 390×844 mobile and desktop projects; the OpenNext `workerd` preview returns HTTP 200 with the required isolation headers.
 
 ## Known MVP limitations
 

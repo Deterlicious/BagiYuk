@@ -69,3 +69,19 @@ test("starting a new split clears a previously opened sample", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Mulai dari foto atau isi sendiri." })).toBeVisible();
   await expect(page.getByLabel("Nama item", { exact: true })).toHaveCount(0);
 });
+
+test("upload validation always tells the user what happened", async ({ page }) => {
+  await page.goto("/split/new?fresh=1");
+  await expect(page.getByRole("heading", { name: "Mulai dari foto atau isi sendiri." })).toBeVisible();
+
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "bukan-struk.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("not an image"),
+  });
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Gunakan foto JPG, PNG, atau WebP." }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pilih foto lain" })).toBeVisible();
+});

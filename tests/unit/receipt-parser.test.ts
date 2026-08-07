@@ -7,6 +7,7 @@ import {
   receiptFromOcrLines,
   type OcrLine,
 } from "@/features/receipt-parser/paddle-receipt-parser";
+import { scanErrorMessage, validateReceiptFile } from "@/features/receipt-parser/receipt-scan";
 import { findReceiptBounds } from "@/lib/image-client";
 import { getImageDimensions } from "@/lib/image";
 
@@ -253,5 +254,28 @@ describe("receipt parser boundary", () => {
         ocrLine("Total 123,000", 50),
       ]),
     ).toThrow("ocr_no_items");
+  });
+});
+
+describe("receipt scan UX boundary", () => {
+  const fileLike = (overrides: Partial<File> = {}) =>
+    ({ name: "receipt.jpeg", type: "image/jpeg", size: 1_024, ...overrides }) as File;
+
+  it("accepts receipt images when a browser omits MIME metadata", () => {
+    expect(validateReceiptFile(fileLike({ type: "" }), 8 * 1024 * 1024)).toBeNull();
+  });
+
+  it("returns actionable validation errors for unsupported, empty, and large files", () => {
+    expect(validateReceiptFile(fileLike({ name: "receipt.pdf", type: "application/pdf" }), 10_000)).toMatch(
+      /JPG, PNG, atau WebP/,
+    );
+    expect(validateReceiptFile(fileLike({ size: 0 }), 10_000)).toMatch(/kosong/);
+    expect(validateReceiptFile(fileLike({ size: 10_001 }), 10_000)).toMatch(/maksimal 8 MB/);
+  });
+
+  it("explains offline, model-loading, and unreadable-receipt failures", () => {
+    expect(scanErrorMessage(new Error("Failed to fetch"), false)).toMatch(/Koneksi internet/);
+    expect(scanErrorMessage(new Error("Failed to download model"), true)).toMatch(/mesin pemindai/i);
+    expect(scanErrorMessage(new Error("ocr_no_items"), true)).toMatch(/item dan harganya/);
   });
 });

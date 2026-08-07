@@ -6,7 +6,7 @@ The core workflow is fully usable without network OCR: **Struk → Periksa → A
 
 ## Features
 
-- Camera/gallery receipt input with in-memory preview and manual fallback.
+- Camera/gallery receipt input with automatic scanning, staged progress, in-memory preview, cancel/retry, and manual fallback.
 - On-device PP-OCRv6 receipt text detection and recognition through PaddleOCR.js, Web Worker, and WASM.
 - Zod-validated structured OCR output and visible low-confidence review states.
 - Editable item names, quantity, unit price, line total, subtotal, tax, service, discount, rounding, and receipt total.
@@ -67,7 +67,7 @@ The main Playwright journey covers a 390×844 mobile viewport and desktop Chromi
 
 ## Privacy and limitations
 
-- Receipt images are processed locally after pressing **Baca struk** and are never uploaded or stored by this MVP.
+- Receipt images are processed locally as soon as a valid photo is selected and are never uploaded or stored by this MVP.
 - Draft JSON stays in the current browser's local storage; it does not sync across devices.
 - The pretrained PP-OCRv6 model files are downloaded from PaddleOCR's official model host on first use and cached by the browser.
 - OCR accuracy depends on image quality and must always be reviewed by the user.

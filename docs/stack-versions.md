@@ -1,6 +1,6 @@
 # Stack versions
 
-Verified against the npm registry on 6 August 2026. All selected releases are stable; no beta, canary, or release-candidate packages are used.
+Verified against the npm registry on 7 August 2026. All selected releases are stable; no beta, canary, or release-candidate packages are used.
 
 | Package | Version | Rationale |
 | --- | ---: | --- |
@@ -14,6 +14,7 @@ Verified against the npm registry on 6 August 2026. All selected releases are st
 | Motion | 13.0.0 | Current stable; limited to wizard state transitions. |
 | Plus Jakarta Sans (Fontsource variable) | 5.3.0 | Stable self-hosted font source, bundled through `next/font/local`. |
 | PaddleOCR.js | 0.4.2 | Stable Apache-2.0 browser runtime for local PP-OCRv6 inference. |
+| ONNX Runtime Web (transitive) | 1.27.0 | WASM inference runtime resolved by PaddleOCR.js; its matching binary version is pinned at runtime. |
 | Zod | 4.4.3 | Current stable validation boundary. |
 | OpenNext Cloudflare | 1.20.2 | Supports Next.js `>=16.2.11`; paired with 16.3.0. |
 | Wrangler | 4.119.0 | Current stable Cloudflare CLI. |

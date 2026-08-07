@@ -10,7 +10,10 @@ BagiYuk uses the stable `@paddleocr/paddleocr-js` package with the pretrained PP
 
 - No Cloudflare Workers AI binding or API key is required.
 - The Paddle detection and recognition models total about 31 MB and are downloaded on the first scan, then reused from the browser cache.
-- The package is loaded dynamically only after the user presses **Baca struk**, so it does not increase the homepage's initial JavaScript path.
+- The package is loaded dynamically only after the user selects a valid receipt photo, so it does not increase the homepage's initial JavaScript path.
+- The scan UI reports four real pipeline stages and elapsed time, then offers cancel/manual exits during a slow first run. A two-minute ceiling stops a stalled scan with an actionable error.
+- COOP/COEP headers allow ONNX Runtime to use a conservative automatic multi-core WASM configuration on supporting browsers; unsupported browsers safely remain single-threaded.
+- The WebAssembly CDN version is pinned to the installed ONNX Runtime version to avoid a JavaScript/binary mismatch.
 - OCR returns text, polygons, and confidence scores. BagiYuk groups fragments into visual rows and parses Indonesian rupiah deterministically.
 
 The existing server provider interface and deterministic mock provider remain available for tests and future optional integrations. Production deliberately selects `mock` for that unused endpoint and has no `AI` binding.
@@ -18,7 +21,7 @@ The existing server provider interface and deterministic mock provider remain av
 ## Input and privacy
 
 - The browser detects likely receipt-paper bounds, crops excess background, upscales narrow receipts, applies grayscale/contrast enhancement, caps the longest edge at 3,200 px, and strips embedded metadata through canvas when browser APIs allow it. The original local preview is unchanged.
-- Parsing starts only after an explicit user action.
+- Parsing starts only after the explicit camera/gallery selection action.
 - The receipt image and OCR inference remain on the user's device. They are not posted to the BagiYuk Worker, written to storage, logged, or placed in local storage.
 - The browser preview is an in-memory object URL and is revoked when replaced or removed.
 - The service worker never caches receipt image requests.
