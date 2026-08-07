@@ -12,7 +12,7 @@ BagiYuk uses the stable `@paddleocr/paddleocr-js` package with the pretrained PP
 - The Paddle detection and recognition models total about 31 MB and are downloaded on the first scan, then reused from the browser cache.
 - The package is loaded dynamically only after the user selects a valid receipt photo, so it does not increase the homepage's initial JavaScript path.
 - The scan UI reports four real pipeline stages and elapsed time, then offers cancel/manual exits during a slow first run. A two-minute ceiling stops a stalled scan with an actionable error.
-- COOP/COEP headers allow ONNX Runtime to use a conservative automatic multi-core WASM configuration on supporting browsers; unsupported browsers safely remain single-threaded.
+- ONNX Runtime uses the broadly compatible single-thread WASM path because cross-origin isolation can block PaddleOCR's generated module worker on the Cloudflare static-asset path.
 - The WebAssembly CDN version is pinned to the installed ONNX Runtime version to avoid a JavaScript/binary mismatch.
 - OCR returns text, polygons, and confidence scores. BagiYuk groups fragments into visual rows and parses Indonesian rupiah deterministically.
 

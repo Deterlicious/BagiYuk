@@ -8,12 +8,6 @@ export type ReceiptScanStage = "preparing" | "loading-model" | "reading" | "fini
 
 let paddlePromise: Promise<PaddleInstance> | null = null;
 
-function availableThreadCount() {
-  // ONNX Runtime only enables threaded WASM inside a cross-origin isolated page.
-  // Zero lets it choose a conservative count based on the device's CPU.
-  return globalThis.crossOriginIsolated ? 0 : 1;
-}
-
 async function getPaddleOcr() {
   if (!paddlePromise) {
     paddlePromise = import("@paddleocr/paddleocr-js")
@@ -26,7 +20,7 @@ async function getPaddleOcr() {
           ortOptions: {
             backend: "wasm",
             wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/",
-            numThreads: availableThreadCount(),
+            numThreads: 1,
             simd: true,
           },
         }),

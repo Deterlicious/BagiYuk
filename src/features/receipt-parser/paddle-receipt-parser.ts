@@ -27,7 +27,7 @@ type OcrRow = {
 
 const SUMMARY_PATTERNS = {
   subtotal: /\b(?:sub\s*tota[l1]|subtota[l1])\b/i,
-  tax: /\b(?:tax\s*1?|pajak|ppn)\b/i,
+  tax: /\b(?:tax\s*\d*%?|pajak|ppn|pb\s*[1il|!])\b/i,
   serviceCharge: /\b(?:service\s*charge|service|svc|charge)\b/i,
   discount: /\b(?:discount|diskon|disc)\b/i,
   rounding: /\b(?:rounding|pembulatan|round)\b/i,
@@ -110,15 +110,20 @@ export function groupOcrLinesIntoRows(lines: OcrLine[]): OcrRow[] {
 function parseIntegerToken(token: string) {
   const normalized = token
     .replace(/[oO]/g, "0")
-    .replace(/[iIlL]/g, "1")
+    .replace(/[iIlL|!]/g, "1")
     .replace(/[^\d-]/g, "");
   if (!normalized || normalized === "-") return null;
   const value = Number(normalized);
   return Number.isSafeInteger(value) ? value : null;
 }
 
+function parseQuantityToken(token: string) {
+  const normalized = token.replace(/[iIlL]/g, "1").replace(/[jJ]/g, "3");
+  return parseIntegerToken(normalized);
+}
+
 function trailingMoney(text: string) {
-  const match = text.match(/(?:^|\s)(-?[\dOoIiLl][\dOoIiLl.,]*(?:\s[\dOoIiLl]{3})*)\s*$/);
+  const match = text.match(/(?:^|\s)(-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)\s*$/);
   const token = match?.[1];
   return token ? parseIntegerToken(token) : null;
 }
@@ -135,11 +140,11 @@ function summaryAmount(rows: OcrRow[], rowIndex: number) {
     .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
     .filter(({ candidate, candidateIndex }) => {
       if (candidateIndex === rowIndex) return false;
-      if (!/^-?[\dOoIiLl][\dOoIiLl.,]*(?:\s[\dOoIiLl]{3})*$/.test(candidate.text.trim())) {
+      if (!/^-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*$/.test(candidate.text.trim())) {
         return false;
       }
       const candidateHeight = Math.max(1, candidate.bottom - candidate.top);
-      const maxDistance = Math.max(rowHeight, candidateHeight) * 2.2;
+      const maxDistance = Math.max(rowHeight, candidateHeight) * 1.25;
       return (
         Math.abs(candidate.centerY - row.centerY) <= maxDistance &&
         (candidate.parts[0]?.left ?? 0) > labelLeft
@@ -155,7 +160,8 @@ function summaryAmount(rows: OcrRow[], rowIndex: number) {
 }
 
 function summaryKind(text: string) {
-  if (/\btotal\s*(?:item|qty|quantity)\b/i.test(text)) return null;
+  if (/\b(?:total\s*(?:item|qty|quantity)|item\s*total)\b/i.test(text)) return null;
+  if (/\b(?:total\s*bayar|payment|paid|kembalian|change)\b/i.test(text)) return null;
   for (const [kind, pattern] of Object.entries(SUMMARY_PATTERNS)) {
     if (pattern.test(text)) return kind as keyof typeof SUMMARY_PATTERNS;
   }
@@ -164,15 +170,17 @@ function summaryKind(text: string) {
 
 function parseItemRow(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
-  const match = normalized.match(
-    /^(\d{1,3})\s+(.+?)\s+(-?[\dOoIiLl][\dOoIiLl.,]*(?:\s[\dOoIiLl]{3})*)$/,
+  const prefixedMatch = normalized.match(
+    /^([\dIiLlJj]{1,3})\s*(?:[xX×]\s*)?(.+?)\s+(-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/,
   );
-  if (!match) return null;
-  const quantityToken = match[1];
-  const name = match[2]?.trim() ?? "";
-  const totalToken = match[3];
+  const atPriceMatch = normalized.match(
+    /^(.+?)\s+@\s*([\dIiLlJj]{1,3})\s*[xX×]\s+[\dOoIiLl|!.,\s]+?\s+(-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/,
+  );
+  const quantityToken = prefixedMatch?.[1] ?? atPriceMatch?.[2];
+  const name = (prefixedMatch?.[2] ?? atPriceMatch?.[1])?.trim() ?? "";
+  const totalToken = prefixedMatch?.[3] ?? atPriceMatch?.[3];
   if (!quantityToken || !totalToken) return null;
-  const quantity = parseIntegerToken(quantityToken);
+  const quantity = parseQuantityToken(quantityToken);
   const lineTotal = parseIntegerToken(totalToken);
   if (!quantity || quantity > 999 || lineTotal === null || lineTotal < 0 || name.length < 2) return null;
   if (/^(?:total|subtotal|tax|service|charge|balance|item|qty)\b/i.test(name)) return null;
@@ -180,18 +188,30 @@ function parseItemRow(text: string) {
 }
 
 function parseItemLabel(text: string) {
-  const match = text.replace(/\s+/g, " ").trim().match(/^(\d{1,3})\s+(.+)$/);
-  const quantityToken = match?.[1];
-  const name = match?.[2]?.trim() ?? "";
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const atPriceMatch = normalized.match(
+    /^(.+?)\s+@\s*([\dIiLlJj]{1,3})\s*[xX×]\s+[\dOoIiLl|!.,\s]+$/,
+  );
+  if (atPriceMatch) {
+    const quantity = parseQuantityToken(atPriceMatch[2] ?? "");
+    const name = atPriceMatch[1]?.trim() ?? "";
+    if (quantity && quantity <= 999 && name.length >= 2) return { quantity, name };
+  }
+
+  const match = normalized.match(
+    /^(?:([\dIiLlJj]{1,3})\s*[xX×]\s*(.+)|([\dIiLlJj]{1,3})\s+(.+))$/,
+  );
+  const quantityToken = match?.[1] ?? match?.[3];
+  const name = (match?.[2] ?? match?.[4])?.trim() ?? "";
   if (!quantityToken || name.length < 2 || trailingMoney(name) !== null) return null;
-  const quantity = parseIntegerToken(quantityToken);
+  const quantity = parseQuantityToken(quantityToken);
   if (!quantity || quantity > 999) return null;
   return { quantity, name };
 }
 
 function moneyOnly(text: string) {
   const normalized = text.trim();
-  if (!/^-?[\dOoIiLl][\dOoIiLl.,]*(?:\s[\dOoIiLl]{3})*$/.test(normalized)) {
+  if (!/^-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*$/.test(normalized)) {
     return null;
   }
   return parseIntegerToken(normalized);
@@ -202,8 +222,20 @@ function extractColumnItems(lines: OcrLine[]) {
     .map(positionLine)
     .filter((line): line is PositionedLine => line !== null)
     .sort((a, b) => a.centerY - b.centerY || a.left - b.left);
-  const summaryStart = positioned.find((line) => summaryKind(line.text) !== null)?.centerY ?? Infinity;
-  const itemRegion = positioned.filter((line) => line.centerY < summaryStart);
+  const summaryStart =
+    groupOcrLinesIntoRows(lines).find((row) => summaryKind(row.text) !== null)?.centerY ?? Infinity;
+  const itemHeader = positioned
+    .filter(
+      (line) =>
+        line.centerY < summaryStart &&
+        /^(?:item|items|menu|description|pesanan)\b/i.test(line.text.trim()),
+    )
+    .at(-1);
+  const itemRegion = positioned.filter(
+    (line) =>
+      line.centerY < summaryStart &&
+      (!itemHeader || line.centerY > itemHeader.centerY + itemHeader.height * 0.45),
+  );
   const labels = itemRegion
     .map((line) => ({ line, parsed: parseItemLabel(line.text) }))
     .filter(
@@ -217,14 +249,32 @@ function extractColumnItems(lines: OcrLine[]) {
         entry.amount !== null && entry.amount >= 0,
     );
 
-  if (
-    labels.length < 2 ||
-    amounts.length < labels.length ||
-    amounts.length > labels.length + 2
-  ) {
-    return [];
-  }
-  const itemAmounts = amounts.slice(0, labels.length);
+  if (labels.length === 0 || amounts.length === 0) return [];
+
+  const unusedAmounts = new Set(amounts.map((_, index) => index));
+  const matchedAmounts = labels.map(({ line }) => {
+    const candidates = [...unusedAmounts]
+      .map((amountIndex) => ({ amountIndex, amount: amounts[amountIndex]! }))
+      .filter(({ amount }) => {
+        const maxHeight = Math.max(line.height, amount.line.height);
+        return (
+          Math.abs(amount.line.centerY - line.centerY) <= maxHeight * 1.45 &&
+          amount.line.left > line.left + line.height
+        );
+      })
+      .sort((a, b) => {
+        const vertical =
+          Math.abs(a.amount.line.centerY - line.centerY) -
+          Math.abs(b.amount.line.centerY - line.centerY);
+        return vertical || b.amount.line.left - a.amount.line.left;
+      });
+    const match = candidates[0];
+    if (!match) return null;
+    unusedAmounts.delete(match.amountIndex);
+    return match.amount;
+  });
+
+  if (matchedAmounts.some((amount) => amount === null)) return [];
 
   return labels.map(({ line, parsed }, index) => {
     const nextCenterY = labels[index + 1]?.line.centerY ?? summaryStart;
@@ -239,10 +289,12 @@ function extractColumnItems(lines: OcrLine[]) {
         candidate.left >= line.left - line.height &&
         candidate.left <= line.left + line.height * 3.5 &&
         /^[A-Za-z][A-Za-z0-9 .&/'-]{1,40}$/.test(text) &&
-        !NON_MERCHANT.test(text)
+        !NON_MERCHANT.test(text) &&
+        summaryKind(text) === null &&
+        !/^(?:nominal\s+belanja|pembulatan|pb\s*[1il|!])\b/i.test(text)
       );
     });
-    const amount = itemAmounts[index]!;
+    const amount = matchedAmounts[index]!;
     const score = clampConfidence(
       [line.score, amount.line.score, ...continuation.map((part) => part.score)].reduce(
         (sum, value) => sum + value,
@@ -370,12 +422,54 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
     throw new Error("ocr_no_items");
   }
 
-  const calculatedSubtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  let calculatedSubtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  if (charges.statedSubtotal > 0 && calculatedSubtotal !== charges.statedSubtotal) {
+    const subtotalAsItem = items.find((item) => item.lineTotal === charges.statedSubtotal);
+    if (subtotalAsItem) {
+      const otherItemsTotal = calculatedSubtotal - subtotalAsItem.lineTotal;
+      const expectedLineTotal = charges.statedSubtotal - otherItemsTotal;
+      if (expectedLineTotal > 0 && expectedLineTotal < subtotalAsItem.lineTotal) {
+        subtotalAsItem.lineTotal = expectedLineTotal;
+        subtotalAsItem.unitPrice =
+          expectedLineTotal % subtotalAsItem.quantity === 0
+            ? expectedLineTotal / subtotalAsItem.quantity
+            : expectedLineTotal;
+        subtotalAsItem.confidence.unitPrice = Math.min(
+          subtotalAsItem.confidence.unitPrice,
+          0.38,
+        );
+        subtotalAsItem.confidence.lineTotal = Math.min(
+          subtotalAsItem.confidence.lineTotal,
+          0.38,
+        );
+        calculatedSubtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+      }
+    }
+  }
   if (charges.statedSubtotal === 0) {
     charges.statedSubtotal = calculatedSubtotal;
     chargeConfidence.statedSubtotal = 0.45;
   }
   if (charges.receiptTotal > 0) {
+    if (charges.tax === 0 && charges.rounding > 0 && charges.statedSubtotal > 0) {
+      const possibleTaxRate = charges.rounding / charges.statedSubtotal;
+      const possibleRounding =
+        charges.receiptTotal -
+        (charges.statedSubtotal +
+          charges.rounding +
+          charges.serviceCharge -
+          charges.discount);
+      if (
+        possibleTaxRate >= 0.03 &&
+        possibleTaxRate <= 0.2 &&
+        Math.abs(possibleRounding) <= 1_000
+      ) {
+        charges.tax = charges.rounding;
+        chargeConfidence.tax = Math.min(chargeConfidence.rounding, 0.62);
+        charges.rounding = possibleRounding;
+        chargeConfidence.rounding = 0.5;
+      }
+    }
     const inferredRounding =
       charges.receiptTotal -
       (charges.statedSubtotal + charges.tax + charges.serviceCharge - charges.discount);

@@ -247,6 +247,140 @@ describe("receipt parser boundary", () => {
     });
   });
 
+  it("parses x-suffixed quantities from the supplied Meatsmith layout", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("Meatsmith Steakhouse", 10),
+      ocrLine("2x T-Bone 500gr 1,000,000", 80),
+      ocrLine("1x Sirloin Steak 550,000", 120),
+      ocrLine("1x Ribeye Steak 450,000", 160),
+      ocrLine("3x Ice Tea 150,000", 200),
+      ocrLine("5x Tonic Water 155,000", 240),
+      ocrLine("5x Orange Juice 240,000", 280),
+      ocrLine("3x Kale Salad 300,000", 320),
+      ocrLine("Subtotal 2,845,000", 380),
+      ocrLine("Tax 11% 312,950", 420),
+      ocrLine("Total 3,157,950", 460),
+    ]);
+
+    expect(receipt.items).toHaveLength(7);
+    expect(receipt.items[0]).toMatchObject({
+      name: "T-Bone 500gr",
+      quantity: 2,
+      unitPrice: 500_000,
+      lineTotal: 1_000_000,
+    });
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 2_845_000,
+      tax: 312_950,
+      receiptTotal: 3_157_950,
+    });
+  });
+
+  it("matches separated prices by row instead of shifting from address numbers", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("Meatsmith Steakhouse", 10),
+      ocrLine("112", 40, 650, 800),
+      ocrLine("2x T-Bone 500gr", 80, 20, 420),
+      ocrLine("1,000,000", 84, 650, 800),
+      ocrLine("1x Sirloin Steak", 120, 20, 420),
+      ocrLine("550,000", 124, 650, 800),
+      ocrLine("Jx Kale Salad", 160, 20, 420),
+      ocrLine("300,000", 164, 650, 800),
+      ocrLine("Subtotal", 220, 20, 250),
+      ocrLine("1,850,000", 224, 650, 800),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "T-Bone 500gr", quantity: 2, lineTotal: 1_000_000 },
+      { name: "Sirloin Steak", quantity: 1, lineTotal: 550_000 },
+      { name: "Kale Salad", quantity: 3, lineTotal: 300_000 },
+    ]);
+  });
+
+  it("repairs a last item that was accidentally paired with the printed subtotal", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("1 Food A 40,000", 80),
+      ocrLine("1 Food B 30,000", 120),
+      ocrLine("1 Food C 100,000", 160),
+      ocrLine("Subtotal 100,000", 200),
+    ]);
+
+    expect(receipt.items.map((item) => item.lineTotal)).toEqual([40_000, 30_000, 30_000]);
+    expect(receipt.items[2]?.confidence.lineTotal).toBeLessThan(0.75);
+  });
+
+  it("parses POS @ pricing and excludes cash tendered from the CW Coffee total", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("CW COFFEE Pal 5", 10),
+      ocrLine("Item Total", 50),
+      ocrLine("Drink Water Original @ 1 x 7,272 7,272", 90),
+      ocrLine("Nominal Belanja 7,272", 150),
+      ocrLine("Subtotal 7,272", 190),
+      ocrLine("PB1 727", 230),
+      ocrLine("Pembulatan 1", 270),
+      ocrLine("Total Belanja 8,000", 310),
+      ocrLine("Total Tagihan 8,000", 350),
+      ocrLine("Total Bayar 10,000", 390),
+      ocrLine("Kembalian 2,000", 430),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "Drink Water Original", quantity: 1, unitPrice: 7_272, lineTotal: 7_272 },
+    ]);
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 7_272,
+      tax: 727,
+      rounding: 1,
+      receiptTotal: 8_000,
+    });
+  });
+
+  it("parses a single POS item when its total is detected in a separate column", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("CW COFFEE Pal 5", 10),
+      ocrLine("31 HUSEIN HAMZAH PAL", 30, 20, 500),
+      ocrLine("5", 34, 650, 800),
+      ocrLine("Item", 60, 20, 200),
+      ocrLine("Total", 64, 650, 800),
+      ocrLine("Drink Water Original @ 1 x 7,272", 90, 20, 560),
+      ocrLine("7,272", 94, 650, 800),
+      ocrLine("Subtotal", 150, 20, 250),
+      ocrLine("7,272", 154, 650, 800),
+      ocrLine("PBI", 190, 20, 250),
+      ocrLine("727", 194, 650, 800),
+      ocrLine("Pembulatan", 212, 20, 250),
+      ocrLine("Total Tagihan", 230, 20, 250),
+      ocrLine("8,000", 234, 650, 800),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "Drink Water Original", quantity: 1, unitPrice: 7_272, lineTotal: 7_272 },
+    ]);
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 7_272,
+      tax: 727,
+      rounding: 1,
+      receiptTotal: 8_000,
+    });
+  });
+
+  it("reconciles a common tax amount when OCR attaches it to the rounding label", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("1 Drink Water Original 7,272", 90),
+      ocrLine("Subtotal 7,272", 150),
+      ocrLine("Pembulatan 727", 190),
+      ocrLine("Total 8,000", 230),
+    ]);
+
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 7_272,
+      tax: 727,
+      rounding: 1,
+      receiptTotal: 8_000,
+    });
+    expect(receipt.chargeConfidence.tax).toBeLessThan(0.75);
+  });
+
   it("rejects OCR output that contains no editable item rows", () => {
     expect(() =>
       receiptFromOcrLines([

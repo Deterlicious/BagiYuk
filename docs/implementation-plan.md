@@ -3,6 +3,21 @@
 Status: completed
 Last updated: 7 August 2026
 
+## Production hotfix: OCR worker compatibility and POS layouts
+
+- Remove cross-origin isolation headers after production evidence showed that the PaddleOCR module worker was blocked before inference.
+- Return ONNX Runtime WASM to the broadly compatible single-thread path while preserving the matching runtime/binary version.
+- Accept quantity prefixes written as `2x`, item descriptions written as `name @ quantity x unit price`, and Indonesian `PB1` tax labels.
+- Exclude payment and change rows from receipt-total detection so cash tendered cannot replace the actual bill total.
+- Add regression fixtures based on the supplied Meatsmith and CW Coffee receipts and verify both real images in the browser before redeployment.
+
+Hotfix verification completed on 7 August 2026:
+
+- The supplied Meatsmith image produced all seven items and reconciled exactly to subtotal Rp2,845,000, tax Rp312,950, and total Rp3,157,950.
+- The supplied CW Coffee image produced its single Rp7,272 item, inferred the misaligned PB1 value as Rp727, kept Rp1 rounding editable, and reconciled exactly to Rp8,000.
+- The long Pagi Sore image reached verification with 45 editable items and reconciled exactly to subtotal Rp7,476,000 and total Rp8,223,600; low-confidence tail fields remain visibly marked for mandatory review.
+- The Cloudflare `workerd` preview returned HTTP 200 without COOP/COEP, confirming that generated PaddleOCR worker assets are no longer isolated from the page.
+
 ## Production follow-up: scan feedback and first-run performance
 
 - Start OCR automatically as soon as a valid camera/gallery image is selected so the upload action has an immediate, predictable result.
@@ -10,8 +25,8 @@ Last updated: 7 August 2026
 - Replace the single spinner with an accessible staged scan panel that explains preparation, engine loading, text recognition, and result assembly while showing elapsed time.
 - Offer cancel, retry, replace-photo, and manual-entry exits without persisting or uploading the receipt image.
 - Add a bounded timeout and distinguish offline/model-load failures from receipts whose text cannot be structured.
-- Match the ONNX Runtime WebAssembly binary version to the installed runtime and enable automatic multi-threading when cross-origin isolation is available.
-- Add the required COOP/COEP response headers and regression coverage for file validation and scan-progress behavior.
+- Match the ONNX Runtime WebAssembly binary version to the installed runtime and keep the compatible single-thread worker path.
+- Add regression coverage for file validation and scan-progress behavior without imposing cross-origin isolation on generated worker assets.
 - Re-run the full quality gates and manually verify the upload/scan experience at mobile and desktop viewports before deployment.
 
 ## Production follow-up: receipt extraction reliability
@@ -108,8 +123,8 @@ Production scan UX follow-up completed on 7 August 2026:
 - Invalid uploads always show an actionable error; missing MIME metadata falls back safely to the supported file extension.
 - Cancellation, retry, replacement, manual fallback, differentiated offline/model/parser failures, and a two-minute timeout were manually verified.
 - The simple supplied receipt still parsed to two exact rows and a reconciled Rp694.500 total after the runtime change.
-- ONNX Runtime uses the matching 1.27.0 WASM binary and automatic conservative threading when COOP/COEP makes the page cross-origin isolated.
-- 29 Vitest checks and eight Playwright scenarios pass across 390×844 mobile and desktop projects; the OpenNext `workerd` preview returns HTTP 200 with the required isolation headers.
+- ONNX Runtime uses the matching 1.27.0 WASM binary; the attempted COOP/COEP threading optimization was removed after production worker compatibility testing.
+- 35 Vitest checks and eight Playwright scenarios pass across 390×844 mobile and desktop projects; the OpenNext `workerd` preview returns HTTP 200 without the incompatible isolation headers.
 
 ## Known MVP limitations
 
