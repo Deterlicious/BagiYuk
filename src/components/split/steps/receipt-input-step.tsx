@@ -24,6 +24,7 @@ import {
 } from "@/features/receipt-parser/paddle-client";
 import {
   receiptScanStages,
+  scanErrorDetail,
   scanErrorMessage,
   scanStageIndex,
   validateReceiptFile,
@@ -49,6 +50,7 @@ export function ReceiptInputStep({
   const [status, setStatus] = useState<"idle" | ReceiptScanStage>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState("");
+  const [errorDetail, setErrorDetail] = useState("");
 
   useEffect(() => {
     return () => {
@@ -74,6 +76,7 @@ export function ReceiptInputStep({
   function chooseFile(selectedFile?: File) {
     if (!selectedFile) return;
     setError("");
+    setErrorDetail("");
     const validationError = validateReceiptFile(selectedFile, MAX_FILE_SIZE);
     if (validationError) {
       setError(validationError);
@@ -97,6 +100,7 @@ export function ReceiptInputStep({
     setStatus("idle");
     setElapsedSeconds(0);
     setError("");
+    setErrorDetail("");
     if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
   }
@@ -106,6 +110,7 @@ export function ReceiptInputStep({
     const controller = new AbortController();
     scanControllerRef.current = controller;
     setError("");
+    setErrorDetail("");
     setElapsedSeconds(0);
     setStatus("preparing");
     let timeout = 0;
@@ -141,6 +146,7 @@ export function ReceiptInputStep({
         return;
       }
       setError(scanErrorMessage(scanError, navigator.onLine));
+      setErrorDetail(scanErrorDetail(scanError));
     } finally {
       window.clearTimeout(timeout);
     }
@@ -349,6 +355,12 @@ export function ReceiptInputStep({
         {error && (
           <div className="mt-4 rounded-xl border border-danger/25 bg-red-50 p-4" role="alert">
             <p className="text-sm leading-6 font-bold text-danger">{error}</p>
+            {errorDetail && (
+              <details className="mt-2 text-xs leading-5 text-muted">
+                <summary className="cursor-pointer font-bold text-ink">Lihat detail teknis</summary>
+                <code className="mt-1 block break-words">{errorDetail}</code>
+              </details>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               {file && (
                 <Button variant="secondary" size="small" onClick={() => void parseReceipt()}>

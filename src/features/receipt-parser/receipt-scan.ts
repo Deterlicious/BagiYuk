@@ -46,3 +46,12 @@ export function scanErrorMessage(error: unknown, online: boolean) {
   }
   return "Struk belum berhasil dibaca. Coba lagi dengan foto yang lebih jelas atau lanjutkan manual.";
 }
+
+export function scanErrorDetail(error: unknown) {
+  if (!(error instanceof Error)) return "Kesalahan pemindai tidak dikenal";
+  const detail = `${error.name}: ${error.message}`
+    .replace(/https?:\/\/\S+/g, "resource eksternal")
+    .replace(/\s+/g, " ")
+    .trim();
+  return detail.slice(0, 180);
+}

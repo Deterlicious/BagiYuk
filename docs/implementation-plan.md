@@ -17,6 +17,8 @@ Hotfix verification completed on 7 August 2026:
 - The supplied CW Coffee image produced its single Rp7,272 item, inferred the misaligned PB1 value as Rp727, kept Rp1 rounding editable, and reconciled exactly to Rp8,000.
 - The long Pagi Sore image reached verification with 45 editable items and reconciled exactly to subtotal Rp7,476,000 and total Rp8,223,600; low-confidence tail fields remain visibly marked for mandatory review.
 - The Cloudflare `workerd` preview returned HTTP 200 without COOP/COEP, confirming that generated PaddleOCR worker assets are no longer isolated from the page.
+- Scan failures now include an optional, URL-sanitized technical detail disclosure for support without overwhelming the primary recovery actions.
+- The deployed Worker was reloaded with a fresh asset build and the real Meatsmith image completed successfully on the production URL with seven items and exact reconciliation.
 
 ## Production follow-up: scan feedback and first-run performance
 
@@ -124,7 +126,7 @@ Production scan UX follow-up completed on 7 August 2026:
 - Cancellation, retry, replacement, manual fallback, differentiated offline/model/parser failures, and a two-minute timeout were manually verified.
 - The simple supplied receipt still parsed to two exact rows and a reconciled Rp694.500 total after the runtime change.
 - ONNX Runtime uses the matching 1.27.0 WASM binary; the attempted COOP/COEP threading optimization was removed after production worker compatibility testing.
-- 35 Vitest checks and eight Playwright scenarios pass across 390×844 mobile and desktop projects; the OpenNext `workerd` preview returns HTTP 200 without the incompatible isolation headers.
+- 36 Vitest checks and eight Playwright scenarios pass across 390×844 mobile and desktop projects; the OpenNext `workerd` preview returns HTTP 200 without the incompatible isolation headers.
 
 ## Known MVP limitations
 

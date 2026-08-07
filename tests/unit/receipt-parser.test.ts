@@ -7,7 +7,11 @@ import {
   receiptFromOcrLines,
   type OcrLine,
 } from "@/features/receipt-parser/paddle-receipt-parser";
-import { scanErrorMessage, validateReceiptFile } from "@/features/receipt-parser/receipt-scan";
+import {
+  scanErrorDetail,
+  scanErrorMessage,
+  validateReceiptFile,
+} from "@/features/receipt-parser/receipt-scan";
 import { findReceiptBounds } from "@/lib/image-client";
 import { getImageDimensions } from "@/lib/image";
 
@@ -411,5 +415,14 @@ describe("receipt scan UX boundary", () => {
     expect(scanErrorMessage(new Error("Failed to fetch"), false)).toMatch(/Koneksi internet/);
     expect(scanErrorMessage(new Error("Failed to download model"), true)).toMatch(/mesin pemindai/i);
     expect(scanErrorMessage(new Error("ocr_no_items"), true)).toMatch(/item dan harganya/);
+  });
+
+  it("keeps technical scan details short and removes resource URLs", () => {
+    const detail = scanErrorDetail(
+      new Error("Failed to load https://cdn.example.test/private-runtime-file.wasm"),
+    );
+    expect(detail).toContain("resource eksternal");
+    expect(detail).not.toContain("https://");
+    expect(detail.length).toBeLessThanOrEqual(180);
   });
 });
