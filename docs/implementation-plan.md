@@ -1,7 +1,26 @@
 # BagiYuk MVP Implementation Plan
 
 Status: completed
-Last updated: 7 August 2026
+Last updated: 10 August 2026
+
+## Professional experience upgrade
+
+- Strengthen receipt-scan trust with a visible photo-quality checklist, clearer review counts for low-confidence fields, and reconciliation guidance before continuing.
+- Accelerate item assignment with bulk owner actions, per-person running totals, and item duplication while preserving deterministic calculation in `src/domain/billing`.
+- Expand results into a payment-ready handoff with individual WhatsApp messages, individual copy actions, and a downloadable branded PNG summary generated locally.
+- Add a concise Help & Privacy page covering receipt photography, fee allocation, reconciliation, offline fallback, and on-device image handling.
+- Add accessible global toast feedback, a respectful PWA install prompt, explicit empty/error states, and privacy-safe first-party event counters that never include receipt contents or personal names.
+- Extend unit and Playwright coverage for the new professional workflow at mobile and desktop sizes.
+- Deliberately exclude bill history from this upgrade; normalized draft autosave remains the only local persistence.
+
+Upgrade verification completed on 10 August 2026:
+
+- Receipt verification exposes a live low-confidence count and requires an explicit correction or review confirmation before continuing.
+- Assignment shortcuts, participant/item duplication, and domain-calculated running subtotals work across mobile and desktop without changing final billing authority.
+- Results provide group share/copy, individual WhatsApp-ready messages, individual copy actions, and a locally rendered PNG download.
+- The Help & Privacy route, delayed PWA install prompt, accessible toast, and allow-listed Analytics Engine event endpoint are included in the offline-safe shell.
+- TypeScript, ESLint, 38 Vitest checks, the Next.js/OpenNext build, and ten Playwright scenarios pass. Workerd returned HTTP 200 for the homepage, help page, and manifest plus HTTP 204 for analytics.
+- Manual browser QA at 390×844 and 1440×1000 found no horizontal overflow or console errors.
 
 ## Production hotfix: OCR worker compatibility and POS layouts
 

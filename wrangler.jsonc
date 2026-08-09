@@ -11,12 +11,24 @@
   "vars": {
     "RECEIPT_AI_PROVIDER": "mock"
   },
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "bagiyuk_product_events"
+    }
+  ],
   "env": {
     "production": {
       "name": "bagiyuk",
       "vars": {
         "RECEIPT_AI_PROVIDER": "mock"
-      }
+      },
+      "analytics_engine_datasets": [
+        {
+          "binding": "ANALYTICS",
+          "dataset": "bagiyuk_product_events"
+        }
+      ]
     }
   },
   "observability": {

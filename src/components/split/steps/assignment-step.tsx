@@ -1,11 +1,13 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Eraser, Sparkles, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { calculateSplit } from "@/domain/billing/calculate-split";
 import type { ItemAssignment, Participant } from "@/domain/billing/types";
 import type { EditableReceiptItem } from "@/domain/receipt/types";
 import { formatRupiah } from "@/lib/currency";
+import { trackProductEvent } from "@/lib/analytics";
 import { avatarColor, initials } from "@/lib/utils";
 
 export function AssignmentStep({
@@ -24,10 +26,29 @@ export function AssignmentStep({
   onContinue: () => void;
 }) {
   const [error, setError] = useState("");
+  const [bulkParticipantId, setBulkParticipantId] = useState(participants[0]?.id ?? "");
   const completed = useMemo(
     () => items.filter((item) => (assignments.find((entry) => entry.itemId === item.id)?.participantIds.length ?? 0) > 0).length,
     [assignments, items],
   );
+  const runningTotals = useMemo(() => {
+    const validAssignments = assignments.filter((assignment) => assignment.participantIds.length > 0);
+    const assignedIds = new Set(validAssignments.map((assignment) => assignment.itemId));
+    const assignedItems = items.filter((item) => assignedIds.has(item.id));
+    if (assignedItems.length === 0) return new Map(participants.map((participant) => [participant.id, 0]));
+    const subtotal = assignedItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    try {
+      const result = calculateSplit({
+        items: assignedItems,
+        participants,
+        assignments: validAssignments,
+        charges: { statedSubtotal: subtotal, tax: 0, serviceCharge: 0, discount: 0, rounding: 0, receiptTotal: subtotal },
+      });
+      return new Map(result.participants.map((allocation) => [allocation.participant.id, allocation.itemSubtotal]));
+    } catch {
+      return new Map(participants.map((participant) => [participant.id, 0]));
+    }
+  }, [assignments, items, participants]);
 
   function ownersFor(itemId: string) {
     return assignments.find((assignment) => assignment.itemId === itemId)?.participantIds ?? [];
@@ -54,6 +75,22 @@ export function AssignmentStep({
         ? owners.filter((id) => id !== participantId)
         : [...owners, participantId],
     );
+  }
+
+  function setEveryItem(participantIds: string[]) {
+    onChange(items.map((item) => ({ itemId: item.id, participantIds })));
+    setError("");
+    trackProductEvent("assignment_bulk_used");
+  }
+
+  function fillUnassigned() {
+    if (!bulkParticipantId) return;
+    onChange(items.map((item) => {
+      const owners = ownersFor(item.id);
+      return { itemId: item.id, participantIds: owners.length > 0 ? owners : [bulkParticipantId] };
+    }));
+    setError("");
+    trackProductEvent("assignment_bulk_used");
   }
 
   function continueFlow() {
@@ -83,6 +120,39 @@ export function AssignmentStep({
             <span className="text-brand">{completed}</span> dari {items.length} item
           </p>
         </div>
+      </div>
+
+      <div className="mt-7 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5">
+        <div className="flex items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/8 text-brand"><Sparkles aria-hidden="true" size={19} /></span>
+          <div>
+            <h2 className="font-extrabold">Pembagian cepat</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">Gunakan aksi massal, lalu ubah item tertentu bila diperlukan.</p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <Button variant="secondary" size="small" onClick={() => setEveryItem(participants.map((participant) => participant.id))}>Bagi semua ke semua</Button>
+          <Button variant="ghost" size="small" onClick={() => setEveryItem([])}><Eraser aria-hidden="true" size={16} /> Kosongkan semua</Button>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <label className="sr-only" htmlFor="bulk-participant">Pemilik untuk item kosong</label>
+          <select id="bulk-participant" value={bulkParticipantId} onChange={(event) => setBulkParticipantId(event.target.value)} className="min-h-11 min-w-0 flex-1 rounded-xl border border-line bg-white px-3 text-sm font-bold outline-none focus:border-brand focus:ring-3 focus:ring-brand/15">
+            {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.name}</option>)}
+          </select>
+          <Button variant="secondary" size="small" onClick={fillUnassigned}>Isi item yang kosong</Button>
+        </div>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-2xl border border-line bg-surface">
+        <div className="border-b border-line px-4 py-3"><h2 className="text-sm font-extrabold">Subtotal sementara per orang</h2><p className="mt-1 text-xs text-muted">Diperbarui langsung dari item yang sudah dipilih; pajak dan biaya muncul pada hasil akhir.</p></div>
+        <dl className="grid divide-y divide-line sm:grid-cols-2 sm:divide-y-0">
+          {participants.map((participant) => (
+            <div key={participant.id} className="flex items-center justify-between gap-3 px-4 py-3 sm:border-b sm:border-line">
+              <dt className="min-w-0 truncate text-sm font-bold text-muted">{participant.name}</dt>
+              <dd className="price shrink-0 font-extrabold text-brand-strong">{formatRupiah(runningTotals.get(participant.id) ?? 0)}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
 
       <div className="mt-8 space-y-4">

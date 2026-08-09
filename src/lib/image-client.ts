@@ -171,3 +171,32 @@ export async function prepareReceiptImage(file: File) {
     return file;
   }
 }
+
+export async function rotateReceiptImage(file: File) {
+  if (typeof createImageBitmap !== "function") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.height;
+    canvas.height = bitmap.width;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) {
+      bitmap.close();
+      return file;
+    }
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width, 0);
+    context.rotate(Math.PI / 2);
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
+    );
+    return blob
+      ? new File([blob], `receipt-rotated-${Date.now()}.jpg`, { type: "image/jpeg" })
+      : file;
+  } catch {
+    return file;
+  }
+}

@@ -1,14 +1,17 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Clipboard, Pencil, Share2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Clipboard, Download, MessageCircle, Pencil, Share2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ResetDialog } from "@/components/ui/reset-dialog";
+import { Toast } from "@/components/ui/toast";
 import { calculateSplit } from "@/domain/billing/calculate-split";
 import type { ItemAssignment, Participant } from "@/domain/billing/types";
 import type { EditableReceipt } from "@/domain/receipt/types";
 import { formatRupiah } from "@/lib/currency";
-import { buildShareText, copyText } from "@/lib/share";
+import { trackProductEvent } from "@/lib/analytics";
+import { createResultImage, downloadBlob } from "@/lib/result-image";
+import { buildParticipantShareText, buildShareText, copyText, whatsappShareUrl } from "@/lib/share";
 import { avatarColor, initials } from "@/lib/utils";
 
 export function ResultsStep({
@@ -27,6 +30,12 @@ export function ResultsStep({
   onReset: () => void;
 }) {
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
+
+  function notify(text: string, tone: "success" | "error" = "success") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
   const calculation = useMemo(() => {
     try {
       return {
@@ -73,9 +82,10 @@ export function ResultsStep({
   async function copyResult() {
     try {
       await copyText(shareText);
-      setMessage("Ringkasan berhasil disalin.");
+      notify("Ringkasan berhasil disalin.");
+      trackProductEvent("result_copied");
     } catch {
-      setMessage("Belum bisa menyalin otomatis. Pilih dan salin ringkasan secara manual.");
+      notify("Belum bisa menyalin otomatis. Pilih dan salin ringkasan secara manual.", "error");
     }
   }
 
@@ -83,13 +93,42 @@ export function ResultsStep({
     try {
       if (navigator.share) {
         await navigator.share({ title: "Hasil BagiYuk", text: shareText });
-        setMessage("Ringkasan siap dibagikan.");
+        notify("Ringkasan siap dibagikan.");
+        trackProductEvent("result_shared");
       } else {
         await copyResult();
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setMessage("Bagikan tidak tersedia. Gunakan tombol salin ringkasan.");
+      notify("Bagikan tidak tersedia. Gunakan tombol salin ringkasan.", "error");
+    }
+  }
+
+  async function copyParticipant(allocation: (typeof result.participants)[number]) {
+    try {
+      await copyText(buildParticipantShareText({ merchantName: receipt.merchantName, allocation }));
+      notify(`Pesan untuk ${allocation.participant.name} berhasil disalin.`);
+      trackProductEvent("participant_copied");
+    } catch {
+      notify("Pesan belum dapat disalin. Coba gunakan tombol WhatsApp.", "error");
+    }
+  }
+
+  function shareParticipant(allocation: (typeof result.participants)[number]) {
+    const text = buildParticipantShareText({ merchantName: receipt.merchantName, allocation });
+    window.open(whatsappShareUrl(text), "_blank", "noopener,noreferrer");
+    notify(`Pesan untuk ${allocation.participant.name} dibuka di WhatsApp.`);
+    trackProductEvent("participant_shared");
+  }
+
+  async function downloadImage() {
+    try {
+      const image = await createResultImage(receipt.merchantName, result);
+      downloadBlob(image, "hasil-bagiyuk.png");
+      notify("Gambar hasil berhasil dibuat.");
+      trackProductEvent("result_image_downloaded");
+    } catch {
+      notify("Gambar belum dapat dibuat di browser ini. Gunakan salin ringkasan.", "error");
     }
   }
 
@@ -210,6 +249,14 @@ export function ResultsStep({
                 </div>
               )}
             </dl>
+            <div className="mt-4 grid grid-cols-2 gap-2 border-t border-dashed border-line pt-4">
+              <Button variant="secondary" size="small" onClick={() => void copyParticipant(allocation)} aria-label={`Salin pesan untuk ${allocation.participant.name}`}>
+                <Clipboard aria-hidden="true" size={15} /> Salin
+              </Button>
+              <Button size="small" onClick={() => shareParticipant(allocation)} aria-label={`Kirim ke WhatsApp untuk ${allocation.participant.name}`}>
+                <MessageCircle aria-hidden="true" size={16} /> WhatsApp
+              </Button>
+            </div>
           </article>
         ))}
       </div>
@@ -225,7 +272,7 @@ export function ResultsStep({
         <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-canvas p-4 font-sans text-sm leading-6 text-ink">
           {shareText}
         </pre>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <Button onClick={shareResult}>
             <Share2 aria-hidden="true" size={18} />
             Bagikan hasil
@@ -234,11 +281,14 @@ export function ResultsStep({
             <Clipboard aria-hidden="true" size={18} />
             Salin ringkasan
           </Button>
+          <Button variant="secondary" onClick={() => void downloadImage()}>
+            <Download aria-hidden="true" size={18} />
+            Unduh gambar
+          </Button>
         </div>
-        <p className="mt-3 min-h-5 text-center text-sm font-bold text-success" aria-live="polite">
-          {message}
-        </p>
       </div>
+
+      <Toast message={message} tone={messageTone} onDismiss={() => setMessage("")} />
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
         <Button variant="ghost" size="small" onClick={onBack}>

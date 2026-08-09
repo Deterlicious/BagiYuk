@@ -3,12 +3,13 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, CircleHelp } from "lucide-react";
 import { useEffect, useReducer, useState } from "react";
 import { BrandMark } from "@/components/brand/brand-mark";
 import { ResetDialog } from "@/components/ui/reset-dialog";
 import type { ItemAssignment, Participant } from "@/domain/billing/types";
 import type { EditableReceipt } from "@/domain/receipt/types";
+import { trackProductEvent } from "@/lib/analytics";
 import {
   createEmptyDraft,
   createEmptyReceipt,
@@ -48,6 +49,7 @@ export function SplitWizard({
 
   useEffect(() => {
     if (initialSample) {
+      trackProductEvent("wizard_sample_started");
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
       dispatch({ type: "hydrate", draft: createSampleDraft() });
       window.history.replaceState({}, "", "/split/new");
@@ -104,6 +106,7 @@ export function SplitWizard({
   }
 
   function startManual() {
+    trackProductEvent("wizard_manual_started");
     const receipt = createEmptyReceipt();
     receipt.items = [
       {
@@ -160,6 +163,12 @@ export function SplitWizard({
               ))}
             </div>
           </div>
+          <Link
+            href="/bantuan"
+            className="hidden min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-bold text-muted transition hover:bg-black/5 hover:text-ink sm:inline-flex"
+          >
+            <CircleHelp aria-hidden="true" size={18} /> Bantuan
+          </Link>
           <ResetDialog onConfirm={reset} />
         </div>
       </header>
@@ -176,7 +185,10 @@ export function SplitWizard({
             {state.step === 1 && (
               <ReceiptInputStep
                 onManual={startManual}
-                onSample={() => dispatch({ type: "hydrate", draft: createSampleDraft() })}
+                onSample={() => {
+                  trackProductEvent("wizard_sample_started");
+                  dispatch({ type: "hydrate", draft: createSampleDraft() });
+                }}
                 onParsed={(receipt) => {
                   setReceipt(receipt);
                   setStep(2);

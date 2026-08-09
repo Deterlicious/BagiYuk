@@ -56,6 +56,16 @@ export function VerificationStep({
     () => receipt.items.reduce((sum, item) => sum + item.lineTotal, 0),
     [receipt.items],
   );
+  const lowConfidenceCount = useMemo(() => {
+    let count = receipt.merchantConfidence < confidenceThreshold ? 1 : 0;
+    for (const item of receipt.items) {
+      count += Object.values(item.confidence).filter((confidence) => confidence < confidenceThreshold).length;
+    }
+    count += Object.values(receipt.chargeConfidence).filter(
+      (confidence) => confidence < confidenceThreshold,
+    ).length;
+    return count;
+  }, [receipt]);
   const calculatedTotal =
     calculatedSubtotal +
     receipt.charges.tax +
@@ -127,6 +137,26 @@ export function VerificationStep({
     });
   }
 
+  function confirmLowConfidenceFields() {
+    onChange({
+      ...receipt,
+      merchantConfidence: 1,
+      items: receipt.items.map((item) => ({
+        ...item,
+        confidence: { name: 1, quantity: 1, unitPrice: 1, lineTotal: 1 },
+      })),
+      chargeConfidence: {
+        statedSubtotal: 1,
+        tax: 1,
+        serviceCharge: 1,
+        discount: 1,
+        rounding: 1,
+        receiptTotal: 1,
+      },
+    });
+    setError("");
+  }
+
   function continueFlow() {
     if (receipt.items.length === 0) {
       setError("Tambahkan setidaknya satu item sebelum melanjutkan.");
@@ -138,6 +168,10 @@ export function VerificationStep({
     }
     if (calculatedTotal < 0) {
       setError("Diskon atau pembulatan membuat total negatif. Periksa ringkasan struk.");
+      return;
+    }
+    if (lowConfidenceCount > 0) {
+      setError(`Masih ada ${lowConfidenceCount} bagian bertanda Periksa. Koreksi nilainya atau tandai bahwa semuanya sudah diperiksa.`);
       return;
     }
     setError("");
@@ -154,6 +188,17 @@ export function VerificationStep({
         <p className="mt-3 text-base leading-7 text-muted">
           Semua hasil scan wajib diperiksa. Label <strong className="text-warning">Periksa</strong> menandai bagian yang kurang yakin terbaca.
         </p>
+      </div>
+
+      <div className={`mt-6 flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 ${lowConfidenceCount > 0 ? "border-warning/30 bg-amber-50" : "border-success/25 bg-[#edf7f2]"}`} role="status">
+        <div className="flex items-start gap-3">
+          {lowConfidenceCount > 0 ? <AlertTriangle className="mt-0.5 shrink-0 text-warning" aria-hidden="true" size={21} /> : <ReceiptText className="mt-0.5 shrink-0 text-success" aria-hidden="true" size={21} />}
+          <div>
+            <p className="font-extrabold">{lowConfidenceCount > 0 ? `${lowConfidenceCount} bagian perlu konfirmasi` : "Semua bagian sudah diperiksa"}</p>
+            <p className="mt-1 text-sm leading-6 text-muted">{lowConfidenceCount > 0 ? "Periksa label berwarna kuning di bawah, lalu edit nilainya atau konfirmasi semuanya sekaligus." : "Kamu tetap dapat mengubah item dan ringkasan sebelum melanjutkan."}</p>
+          </div>
+        </div>
+        {lowConfidenceCount > 0 && <Button variant="secondary" size="small" onClick={confirmLowConfidenceFields}>Tandai sudah diperiksa</Button>}
       </div>
 
       <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">

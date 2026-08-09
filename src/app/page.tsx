@@ -23,12 +23,17 @@ export default function HomePage() {
     <main className="min-h-screen overflow-hidden">
       <header className="mx-auto flex w-full max-w-[1160px] items-center justify-between px-5 py-5 sm:px-8 lg:px-10">
         <BrandMark />
-        <Link
-          href="/split/new?fresh=1"
-          className="rounded-lg px-3 py-2 text-sm font-bold text-brand-strong transition hover:bg-brand/8 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
-        >
-          Buka pembagi
-        </Link>
+        <nav className="flex items-center gap-1" aria-label="Navigasi utama">
+          <Link href="/bantuan" className="rounded-lg px-3 py-2 text-sm font-bold text-muted transition hover:bg-brand/8 hover:text-brand-strong focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25">
+            Bantuan
+          </Link>
+          <Link
+            href="/split/new?fresh=1"
+            className="rounded-lg px-3 py-2 text-sm font-bold text-brand-strong transition hover:bg-brand/8 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
+          >
+            Buka pembagi
+          </Link>
+        </nav>
       </header>
 
       <section className="mx-auto grid w-full max-w-[1160px] items-center gap-12 px-5 pt-10 pb-20 sm:px-8 sm:pt-16 lg:grid-cols-[1.03fr_0.97fr] lg:gap-20 lg:px-10 lg:pt-20 lg:pb-28">
@@ -138,7 +143,10 @@ export default function HomePage() {
 
       <footer className="mx-auto flex w-full max-w-[1160px] flex-col gap-3 px-5 py-8 text-sm text-muted sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
         <BrandMark />
-        <p>Hitungan final selalu dikerjakan secara deterministik, bukan oleh AI.</p>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 sm:justify-end">
+          <Link href="/bantuan" className="font-bold text-brand-strong hover:underline">Bantuan & privasi</Link>
+          <p>Hitungan final selalu dikerjakan secara deterministik, bukan oleh AI.</p>
+        </div>
       </footer>
     </main>
   );

@@ -10,6 +10,7 @@ import {
   Info,
   LoaderCircle,
   RotateCw,
+  ScanLine,
   Sparkles,
   X,
 } from "lucide-react";
@@ -17,6 +18,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { editableReceiptSchema } from "@/domain/receipt/schemas";
 import type { EditableReceipt } from "@/domain/receipt/types";
+import { trackProductEvent } from "@/lib/analytics";
+import { rotateReceiptImage } from "@/lib/image-client";
 import {
   cancelReceiptParsing,
   parseReceiptInBrowser,
@@ -51,6 +54,7 @@ export function ReceiptInputStep({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState("");
   const [errorDetail, setErrorDetail] = useState("");
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     return () => {
@@ -84,6 +88,7 @@ export function ReceiptInputStep({
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(selectedFile);
+    setImageSize(null);
     setPreviewUrl(URL.createObjectURL(selectedFile));
     void parseReceipt(selectedFile);
   }
@@ -101,8 +106,21 @@ export function ReceiptInputStep({
     setElapsedSeconds(0);
     setError("");
     setErrorDetail("");
+    setImageSize(null);
     if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
+  }
+
+  async function rotatePhoto() {
+    if (!file || isParsing) return;
+    const rotated = await rotateReceiptImage(file);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setFile(rotated);
+    setPreviewUrl(URL.createObjectURL(rotated));
+    setImageSize(null);
+    setError("");
+    setErrorDetail("");
+    void parseReceipt(rotated);
   }
 
   async function parseReceipt(selectedFile = file) {
@@ -113,6 +131,7 @@ export function ReceiptInputStep({
     setErrorDetail("");
     setElapsedSeconds(0);
     setStatus("preparing");
+    trackProductEvent("scan_started");
     let timeout = 0;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeout = window.setTimeout(() => {
@@ -135,18 +154,21 @@ export function ReceiptInputStep({
       const receipt = editableReceiptSchema.parse(parsed);
       controller.signal.throwIfAborted();
       scanControllerRef.current = null;
+      trackProductEvent("scan_succeeded");
       onParsed(receipt);
     } catch (scanError) {
       if (scanControllerRef.current === controller) scanControllerRef.current = null;
       setStatus("idle");
       if (["removed", "unmount", "user"].includes(String(controller.signal.reason))) return;
       if (controller.signal.reason === "timeout") {
+        trackProductEvent("scan_failed");
         void cancelReceiptParsing();
         setError("Pemindaian melewati 2 menit dan dihentikan. Coba lagi dengan foto lebih kecil atau lanjutkan manual.");
         return;
       }
       setError(scanErrorMessage(scanError, navigator.onLine));
       setErrorDetail(scanErrorDetail(scanError));
+      trackProductEvent("scan_failed");
     } finally {
       window.clearTimeout(timeout);
     }
@@ -190,18 +212,42 @@ export function ReceiptInputStep({
             <div className="relative overflow-hidden rounded-2xl border border-line bg-[#eee9df]">
               {/* A user-selected blob URL stays in memory and is never persisted. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previewUrl} alt="Pratinjau foto struk" className="max-h-[460px] w-full object-contain" />
+              <img
+                src={previewUrl}
+                alt="Pratinjau foto struk"
+                className="max-h-[460px] w-full object-contain"
+                onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+              />
               {isParsing && <span className="scan-line" aria-hidden="true" />}
               {!isParsing && (
-                <button
-                  type="button"
-                  className="absolute top-3 right-3 grid size-12 place-items-center rounded-xl border border-line bg-white/95 text-ink shadow-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
-                  onClick={removeFile}
-                  aria-label="Hapus foto struk"
-                >
-                  <X aria-hidden="true" size={20} />
-                </button>
+                <div className="absolute top-3 right-3 flex gap-2">
+                  <button
+                    type="button"
+                    className="grid size-12 place-items-center rounded-xl border border-line bg-white/95 text-ink shadow-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
+                    onClick={() => void rotatePhoto()}
+                    aria-label="Putar foto 90 derajat"
+                  >
+                    <RotateCw aria-hidden="true" size={20} />
+                  </button>
+                  <button
+                    type="button"
+                    className="grid size-12 place-items-center rounded-xl border border-line bg-white/95 text-ink shadow-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
+                    onClick={removeFile}
+                    aria-label="Hapus foto struk"
+                  >
+                    <X aria-hidden="true" size={20} />
+                  </button>
+                </div>
               )}
+            </div>
+
+            <div className="mt-3 grid gap-2 rounded-xl border border-line bg-canvas/70 p-3 text-xs sm:grid-cols-3">
+              <p className="flex items-center gap-2 font-bold text-success"><Check aria-hidden="true" size={15} /> Foto berhasil dimuat</p>
+              <p className="flex items-center gap-2 font-bold text-brand-strong"><ScanLine aria-hidden="true" size={15} /> Fokus struk otomatis</p>
+              <p className={`flex items-center gap-2 font-bold ${imageSize && Math.max(imageSize.width, imageSize.height) >= 1200 ? "text-success" : "text-warning"}`}>
+                {imageSize && Math.max(imageSize.width, imageSize.height) >= 1200 ? <Check aria-hidden="true" size={15} /> : <Info aria-hidden="true" size={15} />}
+                {imageSize ? `${imageSize.width} × ${imageSize.height} px` : "Memeriksa resolusi"}
+              </p>
             </div>
 
             <div aria-live="polite" className="mt-5">

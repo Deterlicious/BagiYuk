@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Plus, Trash2, UserRoundPlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, CopyPlus, Plus, Trash2, UserRoundPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { ItemAssignment, Participant } from "@/domain/billing/types";
@@ -51,6 +51,17 @@ export function ParticipantsStep({
         participant.id === id ? { ...participant, name: nextName } : participant,
       ),
     );
+  }
+
+  function duplicateParticipant(participant: Participant) {
+    let suffix = 2;
+    let nextName = `${participant.name.trim() || "Anggota"} ${suffix}`;
+    while (participants.some((entry) => normalized(entry.name) === normalized(nextName))) {
+      suffix += 1;
+      nextName = `${participant.name.trim() || "Anggota"} ${suffix}`;
+    }
+    onChange([...participants, { id: createId("person"), name: nextName }]);
+    setError("");
   }
 
   function removeParticipant(participant: Participant) {
@@ -137,7 +148,7 @@ export function ParticipantsStep({
         ) : (
           <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
             {participants.map((participant, index) => (
-              <div key={participant.id} className="grid grid-cols-[48px_minmax(0,1fr)_48px] items-center gap-3 p-3 sm:p-4">
+              <div key={participant.id} className="grid grid-cols-[48px_minmax(0,1fr)_88px] items-center gap-2 p-3 sm:p-4">
                 <span
                   className="grid size-11 place-items-center rounded-full text-sm font-extrabold text-ink"
                   style={{ backgroundColor: avatarColor(participant.id) }}
@@ -157,14 +168,24 @@ export function ParticipantsStep({
                     maxLength={40}
                   />
                 </div>
-                <button
-                  type="button"
-                  className="grid size-11 place-items-center rounded-xl text-muted transition hover:bg-red-50 hover:text-danger focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-danger/20"
-                  aria-label={`Hapus ${participant.name || `anggota ${index + 1}`}`}
-                  onClick={() => removeParticipant(participant)}
-                >
-                  <Trash2 aria-hidden="true" size={19} />
-                </button>
+                <div className="flex">
+                  <button
+                    type="button"
+                    className="grid size-11 place-items-center rounded-xl text-muted transition hover:bg-brand/8 hover:text-brand focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/20"
+                    aria-label={`Duplikat ${participant.name || `anggota ${index + 1}`}`}
+                    onClick={() => duplicateParticipant(participant)}
+                  >
+                    <CopyPlus aria-hidden="true" size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    className="grid size-11 place-items-center rounded-xl text-muted transition hover:bg-red-50 hover:text-danger focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-danger/20"
+                    aria-label={`Hapus ${participant.name || `anggota ${index + 1}`}`}
+                    onClick={() => removeParticipant(participant)}
+                  >
+                    <Trash2 aria-hidden="true" size={19} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

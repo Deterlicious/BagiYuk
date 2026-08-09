@@ -35,7 +35,8 @@ test("complete sample bill split, copy, return, and reset", async ({ page, conte
   await expect(page.getByText("Ringkasan berhasil disalin.")).toBeVisible();
 
   await page.getByRole("button", { name: "Ubah pembagian" }).click();
-  await expect(itemCards.nth(0).getByLabel("Ayu")).toBeChecked();
+  await expect(page.getByRole("heading", { name: "Siapa memesan apa?" })).toBeVisible();
+  await expect(page.getByRole("article").nth(0).getByRole("checkbox", { name: "Ayu", exact: true })).toBeChecked();
 
   await page.getByRole("button", { name: "Mulai ulang" }).first().click();
   await page.getByRole("button", { name: "Ya, mulai ulang" }).click();
@@ -84,4 +85,32 @@ test("upload validation always tells the user what happened", async ({ page }) =
     page.getByRole("alert").filter({ hasText: "Gunakan foto JPG, PNG, atau WebP." }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Pilih foto lain" })).toBeVisible();
+});
+
+test("professional shortcuts, individual share, and help remain accessible", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/split/new?sample=1");
+  await page.getByRole("button", { name: "Lanjut ke anggota" }).click();
+
+  const participantInput = page.getByLabel("Nama anggota", { exact: true });
+  for (const participant of ["Ayu", "Bima"]) {
+    await participantInput.fill(participant);
+    await page.getByRole("button", { name: "Tambahkan" }).click();
+  }
+  await page.getByRole("button", { name: "Duplikat Ayu" }).click();
+  await expect(page.locator('input[value="Ayu 2"]')).toBeVisible();
+  await page.getByRole("button", { name: "Pilih pesanan" }).click();
+
+  await page.getByRole("button", { name: "Bagi semua ke semua" }).click();
+  await expect(page.getByText("4 dari 4 item")).toBeVisible();
+  await expect(page.getByText("Subtotal sementara per orang")).toBeVisible();
+  await page.getByRole("button", { name: "Lihat hasil" }).click();
+
+  await page.getByRole("button", { name: "Salin pesan untuk Ayu", exact: true }).click();
+  await expect(page.getByText("Pesan untuk Ayu berhasil disalin.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Unduh gambar" })).toBeVisible();
+
+  await page.goto("/bantuan");
+  await expect(page.getByRole("heading", { name: "Hasil yang akurat dimulai dari pemeriksaan yang jelas." })).toBeVisible();
+  await expect(page.getByText("Privasi struk", { exact: true })).toBeVisible();
 });

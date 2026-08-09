@@ -1,5 +1,5 @@
-const CACHE_NAME = "bagiyuk-shell-v3";
-const SHELL = ["/", "/split/new", "/manifest.webmanifest", "/icons/icon.svg"];
+const CACHE_NAME = "bagiyuk-shell-v4";
+const SHELL = ["/", "/split/new", "/bantuan", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)));
