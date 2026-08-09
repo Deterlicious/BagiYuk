@@ -18,8 +18,8 @@ Upgrade verification completed on 10 August 2026:
 - Receipt verification exposes a live low-confidence count and requires an explicit correction or review confirmation before continuing.
 - Assignment shortcuts, participant/item duplication, and domain-calculated running subtotals work across mobile and desktop without changing final billing authority.
 - Results provide group share/copy, individual WhatsApp-ready messages, individual copy actions, and a locally rendered PNG download.
-- The Help & Privacy route, delayed PWA install prompt, accessible toast, and allow-listed Analytics Engine event endpoint are included in the offline-safe shell.
-- TypeScript, ESLint, 38 Vitest checks, the Next.js/OpenNext build, and ten Playwright scenarios pass. Workerd returned HTTP 200 for the homepage, help page, and manifest plus HTTP 204 for analytics.
+- The Help & Privacy route, delayed PWA install prompt, accessible toast, and allow-listed analytics endpoint are included in the offline-safe shell. Analytics storage remains optional when its Cloudflare binding is unavailable.
+- TypeScript, ESLint, 38 Vitest checks, the Next.js/OpenNext build, and ten Playwright scenarios pass. Workerd returned HTTP 200 for the homepage, help page, and manifest plus HTTP 204 for the optional analytics endpoint.
 - Manual browser QA at 390×844 and 1440×1000 found no horizontal overflow or console errors.
 
 ## Production hotfix: OCR worker compatibility and POS layouts

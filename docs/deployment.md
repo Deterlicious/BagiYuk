@@ -25,6 +25,6 @@ Run `pnpm preview`. The script builds through OpenNext and starts Wrangler's loc
 3. Run `pnpm deploy`. The script builds the credential-free production Worker and removes the unused ONNX JSEP/WebGPU artifact that would otherwise exceed Cloudflare's per-asset limit; OCR itself uses the WASM backend.
 4. Confirm the generated `workers.dev` or custom-domain URL, then test local OCR and the manual split flow on a phone.
 
-The Wrangler configuration also provisions the `bagiyuk_product_events` Analytics Engine dataset on first write. It stores only allow-listed aggregate event names; no receipt image, item text, participant name, or money value is sent. Querying it requires a separate Cloudflare API token with Account Analytics Read permission, which must never be exposed to the browser.
+Product analytics is optional and must never block deployment. The event endpoint stores nothing when no binding exists. To enable aggregate product events later, first enable Analytics Engine in the Cloudflare dashboard, then add an `analytics_engine_datasets` binding named `ANALYTICS` with dataset `bagiyuk_product_events` to both the default and production Wrangler environments. It stores only allow-listed event names; no receipt image, item text, participant name, or money value is sent. Querying it requires a separate Cloudflare API token with Account Analytics Read permission, which must never be exposed to the browser.
 
 No database, bucket, or durable storage is required for the MVP.

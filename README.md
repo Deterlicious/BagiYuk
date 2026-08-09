@@ -15,7 +15,7 @@ The core workflow is fully usable without network OCR: **Struk → Periksa → A
 - Explicit subtotal and final-total reconciliation; mismatches are never hidden.
 - WhatsApp-readable Web Share output with clipboard fallback.
 - Per-person WhatsApp messages and a locally generated downloadable PNG summary.
-- First-party, content-free product event counters through Cloudflare Analytics Engine.
+- First-party, content-free product event counters with an optional Cloudflare Analytics Engine binding.
 - Built-in Help & Privacy guidance and a respectful install prompt.
 - Local JSON draft autosave without persisting receipt images.
 - Installable PWA manifest and offline shell for the manual workflow.
