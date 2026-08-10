@@ -1,5 +1,5 @@
 const MAX_INFERENCE_DIMENSION = 3_200;
-const MIN_RECEIPT_WIDTH = 1_100;
+const MIN_RECEIPT_WIDTH = 1_400;
 const ANALYSIS_DIMENSION = 360;
 const JPEG_QUALITY = 0.92;
 
@@ -116,8 +116,59 @@ function detectBounds(bitmap: ImageBitmap): ReceiptBounds {
  * Crops likely paper boundaries, enlarges narrow receipts, raises contrast, and
  * removes embedded metadata. The original preview remains local in memory.
  */
-export async function prepareReceiptImage(file: File) {
-  if (typeof createImageBitmap !== "function") return file;
+async function canvasToReceiptFile(
+  canvas: HTMLCanvasElement,
+  variant: "balanced" | "contrast",
+) {
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
+  );
+  return blob
+    ? new File([blob], `receipt-${variant}-${Date.now()}.jpg`, {
+        type: "image/jpeg",
+        lastModified: Date.now(),
+      })
+    : null;
+}
+
+function renderReceiptCanvas(
+  bitmap: ImageBitmap,
+  crop: ReceiptBounds,
+  width: number,
+  height: number,
+  filter: string,
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) return null;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.filter = filter;
+  context.drawImage(
+    bitmap,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    width,
+    height,
+  );
+  return canvas;
+}
+
+/**
+ * Produces two aligned, metadata-free variants. The balanced image is used for
+ * the fast first pass; the stronger contrast variant is only OCR'd when the
+ * parsed subtotal indicates missing or misaligned rows.
+ */
+export async function prepareReceiptImageVariants(file: File) {
+  if (typeof createImageBitmap !== "function") return [file];
 
   try {
     const bitmap = await createImageBitmap(file);
@@ -133,43 +184,36 @@ export async function prepareReceiptImage(file: File) {
     );
     const width = Math.max(1, Math.round(crop.width * scale));
     const height = Math.max(1, Math.round(crop.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) {
-      bitmap.close();
-      return file;
-    }
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.filter = "grayscale(1) contrast(1.14)";
-    context.drawImage(
+    const balancedCanvas = renderReceiptCanvas(
       bitmap,
-      crop.x,
-      crop.y,
-      crop.width,
-      crop.height,
-      0,
-      0,
+      crop,
       width,
       height,
+      "grayscale(1) contrast(1.18)",
     );
+    const contrastCanvas = renderReceiptCanvas(
+      bitmap,
+      crop,
+      width,
+      height,
+      "grayscale(1) contrast(1.58) brightness(1.04)",
+    );
+    if (!balancedCanvas || !contrastCanvas) {
+      bitmap.close();
+      return [file];
+    }
+    const balanced = await canvasToReceiptFile(balancedCanvas, "balanced");
+    const contrast = await canvasToReceiptFile(contrastCanvas, "contrast");
     bitmap.close();
-
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
-    );
-    if (!blob) return file;
-    return new File([blob], `receipt-${Date.now()}.jpg`, {
-      type: "image/jpeg",
-      lastModified: Date.now(),
-    });
+    return [balanced ?? file, contrast ?? balanced ?? file];
   } catch {
-    return file;
+    return [file];
   }
+}
+
+export async function prepareReceiptImage(file: File) {
+  const variants = await prepareReceiptImageVariants(file);
+  return variants[0] ?? file;
 }
 
 export async function rotateReceiptImage(file: File) {

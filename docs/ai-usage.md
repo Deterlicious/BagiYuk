@@ -11,7 +11,7 @@ BagiYuk uses the stable `@paddleocr/paddleocr-js` package with the pretrained PP
 - No Cloudflare Workers AI binding or API key is required.
 - The Paddle detection and recognition models total about 31 MB and are downloaded on the first scan, then reused from the browser cache.
 - The package is loaded dynamically only after the user selects a valid receipt photo, so it does not increase the homepage's initial JavaScript path.
-- The scan UI reports four real pipeline stages and elapsed time, then offers cancel/manual exits during a slow first run. A two-minute ceiling stops a stalled scan with an actionable error.
+- The scan UI reports five real pipeline stages and elapsed time, including an optional enhancement pass, then offers cancel/manual exits during a slow first run. A two-minute ceiling stops a stalled scan with an actionable error.
 - ONNX Runtime uses the broadly compatible single-thread WASM path because cross-origin isolation can block PaddleOCR's generated module worker on the Cloudflare static-asset path.
 - The WebAssembly CDN version is pinned to the installed ONNX Runtime version to avoid a JavaScript/binary mismatch.
 - OCR returns text, polygons, and confidence scores. BagiYuk groups fragments into visual rows and parses Indonesian rupiah deterministically.
@@ -20,7 +20,8 @@ The existing server provider interface and deterministic mock provider remain av
 
 ## Input and privacy
 
-- The browser detects likely receipt-paper bounds, crops excess background, upscales narrow receipts, applies grayscale/contrast enhancement, caps the longest edge at 3,200 px, and strips embedded metadata through canvas when browser APIs allow it. The original local preview is unchanged.
+- The browser detects likely receipt-paper bounds, crops excess background, upscales narrow receipts, produces aligned balanced/high-contrast variants, caps the longest edge at 3,200 px, and strips embedded metadata through canvas when browser APIs allow it. The original local preview is unchanged.
+- The balanced variant is scanned first. The stronger variant is only scanned when item names look like prices or detected line totals do not reasonably cover the printed subtotal, avoiding a routine two-pass speed penalty.
 - Parsing starts only after the explicit camera/gallery selection action.
 - The receipt image and OCR inference remain on the user's device. They are not posted to the BagiYuk Worker, written to storage, logged, or placed in local storage.
 - The browser preview is an in-memory object URL and is revoked when replaced or removed.
@@ -31,8 +32,10 @@ The existing server provider interface and deterministic mock provider remain av
 OCR fragments are untrusted input. The deterministic parser:
 
 - groups fragments by their detected coordinates;
-- recognizes quantity, item name, and trailing rupiah amount;
+- recognizes quantity, item name, unit price, and line total even when a POS printer places them in separate columns or adjacent rows;
+- accepts `Rp` and `IDR` prefixes without allowing standalone prices to become item names;
 - extracts subtotal, tax, service, discount, rounding, and total labels;
+- scores multiple OCR candidates by reconciliation, confidence, item coverage, and name quality;
 - preserves all rupiah values as safe integers;
 - validates the final editable receipt with Zod; and
 - exposes low-confidence fields as **Periksa**.
@@ -41,4 +44,4 @@ When a line total divides evenly by its quantity, the unit price is derived exac
 
 ## Fallbacks
 
-If the model cannot download, the browser lacks required WASM support, or OCR finds no item rows, the selected preview remains visible and the user can retry or continue with **Masukkan manual**. The sample-data and complete manual split journeys remain usable without OCR.
+If the model cannot download, the browser lacks required WASM support, or OCR finds no item rows, the selected preview remains visible and the user can retry or continue with **Masukkan manual**. If OCR returns structurally suspicious rows, the verification page shows the item/subtotal coverage and marks the affected editable values as low confidence. The sample-data and complete manual split journeys remain usable without OCR.

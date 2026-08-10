@@ -26,7 +26,7 @@ type OcrRow = {
 };
 
 const SUMMARY_PATTERNS = {
-  subtotal: /\b(?:sub\s*tota[l1]|subtota[l1])\b/i,
+  subtotal: /\b(?:sub[\s-]*tota[l1]|subtota[l1]|nominal\s+belanja)\b/i,
   tax: /\b(?:tax\s*\d*%?|pajak|ppn|pb\s*[1il|!])\b/i,
   serviceCharge: /\b(?:service\s*charge|service|svc|charge)\b/i,
   discount: /\b(?:discount|diskon|disc)\b/i,
@@ -35,6 +35,7 @@ const SUMMARY_PATTERNS = {
 } as const;
 
 const NON_MERCHANT = /^[^A-Za-z]*(?:checking|dine\s*in|take\s*away|pos\b|cashier\b|server\b|print\b|table\b|tbl\b|cover\b|date\b|thank\s*you)/i;
+const NON_ITEM_LABEL = /^(?:cash|tendered|change|kembalian|payment|paid|debet\s*card|debit\s*card|credit\s*card|emoney)$/i;
 
 function clampConfidence(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -71,7 +72,7 @@ export function groupOcrLinesIntoRows(lines: OcrLine[]): OcrRow[] {
       const overlapRatio = overlap / Math.min(rowHeight, line.height);
       const distance = Math.abs(row.centerY - line.centerY);
       if (
-        row.parts.length < 4 &&
+        row.parts.length < 12 &&
         projectedSpan <= maxPartHeight * 1.65 &&
         (overlapRatio >= 0.45 || distance <= maxPartHeight * 0.42) &&
         distance < bestDistance
@@ -108,9 +109,15 @@ export function groupOcrLinesIntoRows(lines: OcrLine[]): OcrRow[] {
 }
 
 function parseIntegerToken(token: string) {
-  const normalized = token
+  const withoutCurrency = token
+    .replace(/(?:rp\.?|idr)\s*/gi, "")
     .replace(/[oO]/g, "0")
     .replace(/[iIlL|!]/g, "1")
+    .trim();
+  const withoutZeroDecimals = /[.,]00$/.test(withoutCurrency)
+    ? withoutCurrency.slice(0, -3)
+    : withoutCurrency;
+  const normalized = withoutZeroDecimals
     .replace(/[^\d-]/g, "");
   if (!normalized || normalized === "-") return null;
   const value = Number(normalized);
@@ -123,7 +130,9 @@ function parseQuantityToken(token: string) {
 }
 
 function trailingMoney(text: string) {
-  const match = text.match(/(?:^|\s)(-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)\s*$/);
+  const match = text.match(
+    /(?:^|\s)((?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)\s*$/i,
+  );
   const token = match?.[1];
   return token ? parseIntegerToken(token) : null;
 }
@@ -140,7 +149,7 @@ function summaryAmount(rows: OcrRow[], rowIndex: number) {
     .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
     .filter(({ candidate, candidateIndex }) => {
       if (candidateIndex === rowIndex) return false;
-      if (!/^-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*$/.test(candidate.text.trim())) {
+      if (!/^(?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*$/i.test(candidate.text.trim())) {
         return false;
       }
       const candidateHeight = Math.max(1, candidate.bottom - candidate.top);
@@ -170,20 +179,56 @@ function summaryKind(text: string) {
 
 function parseItemRow(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
+  const prefixedWithUnitMatch = normalized.match(
+    /^([\dIiLlJj]{1,3})\s*(?:[xX×]\s*)?(.+?)\s+((?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)\s+((?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)$/i,
+  );
+  const nameFirstWithUnitMatch = normalized.match(
+    /^(.+?)\s+([\dIiLlJj]{1,3})\s+((?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)\s+((?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)$/i,
+  );
+  const nameFirstMatch = normalized.match(
+    /^(.+?)\s+([\dIiLlJj]{1,3})\s+((?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/i,
+  );
+  const implicitQuantityMatch = normalized.match(
+    /^(.+?)\s+((?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/i,
+  );
   const prefixedMatch = normalized.match(
-    /^([\dIiLlJj]{1,3})\s*(?:[xX×]\s*)?(.+?)\s+(-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/,
+    /^([\dIiLlJj]{1,3})\s*(?:[xX×]\s*)?(.+?)\s+((?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/i,
   );
   const atPriceMatch = normalized.match(
-    /^(.+?)\s+@\s*([\dIiLlJj]{1,3})\s*[xX×]\s+[\dOoIiLl|!.,\s]+?\s+(-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/,
+    /^(.+?)\s+@\s*([\dIiLlJj]{1,3})\s*[xX×]\s+(?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!.,\s]+?\s+((?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*)$/i,
   );
-  const quantityToken = prefixedMatch?.[1] ?? atPriceMatch?.[2];
-  const name = (prefixedMatch?.[2] ?? atPriceMatch?.[1])?.trim() ?? "";
-  const totalToken = prefixedMatch?.[3] ?? atPriceMatch?.[3];
+  const quantityToken =
+    prefixedWithUnitMatch?.[1] ??
+    nameFirstWithUnitMatch?.[2] ??
+    nameFirstMatch?.[2] ??
+    prefixedMatch?.[1] ??
+    atPriceMatch?.[2] ??
+    (implicitQuantityMatch ? "1" : undefined);
+  const name = (
+    prefixedWithUnitMatch?.[2] ??
+    nameFirstWithUnitMatch?.[1] ??
+    nameFirstMatch?.[1] ??
+    prefixedMatch?.[2] ??
+    atPriceMatch?.[1] ??
+    implicitQuantityMatch?.[1]
+  )?.trim() ?? "";
+  const totalToken =
+    prefixedWithUnitMatch?.[4] ??
+    nameFirstWithUnitMatch?.[4] ??
+    nameFirstMatch?.[3] ??
+    prefixedMatch?.[3] ??
+    atPriceMatch?.[3] ??
+    implicitQuantityMatch?.[2];
   if (!quantityToken || !totalToken) return null;
   const quantity = parseQuantityToken(quantityToken);
   const lineTotal = parseIntegerToken(totalToken);
   if (!quantity || quantity > 999 || lineTotal === null || lineTotal < 0 || name.length < 2) return null;
-  if (/^(?:total|subtotal|tax|service|charge|balance|item|qty)\b/i.test(name)) return null;
+  if (/^(?:total|subtotal|tax|service|charge|balance|item|qty|rp\.?|idr)\b/i.test(name)) return null;
+  if (/^(?:food|beverages?|drinks?|others?)$/i.test(name)) return null;
+  if (NON_ITEM_LABEL.test(name.replace(/:$/, "").trim())) return null;
+  if (implicitQuantityMatch && !/[.,]|\b(?:rp\.?|idr)\b/i.test(totalToken) && lineTotal < 1_000) {
+    return null;
+  }
   return { quantity, name, lineTotal };
 }
 
@@ -211,10 +256,243 @@ function parseItemLabel(text: string) {
 
 function moneyOnly(text: string) {
   const normalized = text.trim();
-  if (!/^-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*$/.test(normalized)) {
+  if (!/^(?:(?:rp\.?|idr)\s*)?-?[\dOoIiLl|!][\dOoIiLl|!.,]*(?:\s[\dOoIiLl|!]{3})*$/i.test(normalized)) {
     return null;
   }
   return parseIntegerToken(normalized);
+}
+
+type ParsedLayoutItem = {
+  quantity: number;
+  name: string;
+  lineTotal: number;
+  score: number;
+};
+
+function isTableHeader(row: OcrRow) {
+  if (/\b(?:(?:total|jumlah)\s+items?|items?\s*(?:count|closed))\b/i.test(row.text)) {
+    return false;
+  }
+  const matches = row.text.match(/\b(?:item|items|menu|nama|description|qty|jml|jumlah|harga|price|amount|total)\b/gi);
+  return (matches?.length ?? 0) >= 2 && summaryKind(row.text) === null;
+}
+
+function meaningfulItemName(name: string) {
+  const normalized = name.replace(/\s+/g, " ").trim();
+  return (
+    normalized.length >= 2 &&
+    /[A-Za-z]/.test(normalized) &&
+    !/^(?:rp\.?|idr|total|subtotal|tax|pajak|ppn|pb\s*[1il|!]|service|charge|qty|harga)\b/i.test(normalized) &&
+    !/^(?:food|beverages?|drinks?|others?)$/i.test(normalized) &&
+    !NON_ITEM_LABEL.test(normalized.replace(/:$/, "").trim()) &&
+    moneyOnly(normalized) === null
+  );
+}
+
+function parseCurrencyDetailRow(row: OcrRow): ParsedLayoutItem | null {
+  const normalized = row.text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(
+    /^([\dIiLlJj]{1,3})\s*[xX×]\s+((?:(?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)(?:\s+(?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)*)$/i,
+  );
+  if (!match) return null;
+  const quantity = parseQuantityToken(match[1] ?? "");
+  const moneyTokens = [...(match[2] ?? "").matchAll(/(?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*/gi)]
+    .map((candidate) => parseIntegerToken(candidate[0]))
+    .filter((value): value is number => value !== null);
+  const lineTotal = moneyTokens.at(-1);
+  if (!quantity || quantity > 999 || lineTotal === undefined || lineTotal < 0) return null;
+  return { quantity, name: "", lineTotal, score: row.score };
+}
+
+function parsePriceQuantityDetailRow(row: OcrRow): ParsedLayoutItem | null {
+  const normalized = row.text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(
+    /^(?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*\s*[xX×]\s*([\dIiLlJj]{1,3})\s+((?:(?:rp\.?|idr)\s*)?[\dOoIiLl|!][\dOoIiLl|!.,]*)$/i,
+  );
+  if (!match) return null;
+  const quantity = parseQuantityToken(match[1] ?? "");
+  const lineTotal = parseIntegerToken(match[2] ?? "");
+  if (!quantity || quantity > 999 || lineTotal === null || lineTotal < 0) return null;
+  return { quantity, name: "", lineTotal, score: row.score };
+}
+
+function parseStandalonePriceRow(row: OcrRow): ParsedLayoutItem | null {
+  const normalized = row.text.trim();
+  const lineTotal = moneyOnly(normalized);
+  if (lineTotal === null || lineTotal < 0) return null;
+  const visiblyFormatted = /[.,]|\b(?:rp\.?|idr)\b/i.test(normalized);
+  if (!visiblyFormatted && lineTotal !== 0 && lineTotal < 1_000) return null;
+  if (!visiblyFormatted && lineTotal >= 100_000_000) return null;
+  return { quantity: 1, name: "", lineTotal, score: row.score };
+}
+
+function pendingItemIdentity(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const quantityMatch = normalized.match(/^([\dIiLlJj]{1,3})\s+(.+)$/);
+  if (!quantityMatch || !meaningfulItemName(quantityMatch[2] ?? "")) {
+    return { quantity: 1, name: normalized };
+  }
+  const quantity = parseQuantityToken(quantityMatch[1] ?? "");
+  return {
+    quantity: quantity && quantity <= 999 ? quantity : 1,
+    name: quantityMatch[2]?.trim() ?? normalized,
+  };
+}
+
+function parseLayoutRow(row: OcrRow, quantityColumnX?: number): ParsedLayoutItem | null {
+  const currencyDetail = parseCurrencyDetailRow(row);
+  if (currencyDetail) return currencyDetail;
+  const priceQuantityDetail = parsePriceQuantityDetailRow(row);
+  if (priceQuantityDetail) return priceQuantityDetail;
+
+  const direct = parseItemRow(row.text);
+  if (direct && meaningfulItemName(direct.name)) return { ...direct, score: row.score };
+
+  const standalonePrice = parseStandalonePriceRow(row);
+  if (standalonePrice) return standalonePrice;
+
+  const parts = row.parts.slice().sort((a, b) => a.left - b.left);
+  const amounts = parts
+    .map((part) => ({ part, amount: moneyOnly(part.text) }))
+    .filter(
+      (entry): entry is { part: PositionedLine; amount: number } =>
+        entry.amount !== null && entry.amount >= 0,
+    );
+  if (amounts.length === 0) return null;
+
+  const quantityCandidates = amounts.filter(({ part, amount }) => {
+    const normalized = part.text.trim();
+    return amount >= 1 && amount <= 999 && /^[\dIiLlJj]{1,3}\s*[xX×]?$/.test(normalized);
+  });
+  const quantityEntry = quantityCandidates.sort((a, b) => {
+    if (quantityColumnX !== undefined) {
+      const aCenter = (a.part.left + a.part.right) / 2;
+      const bCenter = (b.part.left + b.part.right) / 2;
+      return Math.abs(aCenter - quantityColumnX) - Math.abs(bCenter - quantityColumnX);
+    }
+    return a.part.left - b.part.left;
+  })[0];
+  const priceEntries = amounts.filter((entry) => entry !== quantityEntry);
+  const totalEntry = priceEntries.sort((a, b) => b.part.left - a.part.left)[0];
+  if (!totalEntry) return null;
+
+  const embeddedLabel = parts
+    .map((part) => ({ part, label: parseItemLabel(part.text) }))
+    .find((entry) => entry.label !== null);
+  const nameWithTrailingQuantity = parts
+    .filter((part) => !amounts.some((entry) => entry.part === part))
+    .map((part) => ({
+      part,
+      match: part.text.trim().match(/^(.+?)\s+([\dIiLlJj]{1,3})\s*[xX×]?$/),
+    }))
+    .find((entry) => entry.match && meaningfulItemName(entry.match[1] ?? ""));
+  const quantity =
+    embeddedLabel?.label?.quantity ??
+    (nameWithTrailingQuantity?.match
+      ? parseQuantityToken(nameWithTrailingQuantity.match[2] ?? "")
+      : null) ??
+    quantityEntry?.amount ??
+    1;
+  const explicitName =
+    embeddedLabel?.label?.name ?? nameWithTrailingQuantity?.match?.[1]?.trim() ?? "";
+  const nameParts = parts.filter((part) => {
+    if (amounts.some((entry) => entry.part === part)) return false;
+    if (embeddedLabel?.part === part || nameWithTrailingQuantity?.part === part) return false;
+    const text = part.text.trim();
+    return (
+      meaningfulItemName(text) &&
+      !/^\d+\s*[xX×]\s*(?:rp\.?|idr)\b/i.test(text) &&
+      !isTableHeader({ ...row, text })
+    );
+  });
+  const name = [explicitName, ...nameParts.map((part) => part.text.trim())]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const usedScores = [
+    totalEntry.part.score,
+    ...(quantityEntry ? [quantityEntry.part.score] : []),
+    ...nameParts.map((part) => part.score),
+    ...(embeddedLabel ? [embeddedLabel.part.score] : []),
+  ];
+  return {
+    quantity,
+    name,
+    lineTotal: totalEntry.amount,
+    score: clampConfidence(usedScores.reduce((sum, value) => sum + value, 0) / usedScores.length),
+  };
+}
+
+function extractLayoutItems(lines: OcrLine[]) {
+  const rows = groupOcrLinesIntoRows(lines);
+  const summaryIndex = rows.findIndex((row) => summaryKind(row.text) !== null);
+  const endIndex = summaryIndex < 0 ? rows.length : summaryIndex;
+  const headerIndex = rows.slice(0, endIndex).findLastIndex(isTableHeader);
+  const quantityHeader = headerIndex >= 0
+    ? rows[headerIndex]?.parts.find((part) => /^(?:qty|jml|jumlah|quantity)$/i.test(part.text.trim()))
+    : undefined;
+  const quantityColumnX = quantityHeader
+    ? (quantityHeader.left + quantityHeader.right) / 2
+    : undefined;
+  const firstDataIndex = rows.slice(0, endIndex).findIndex((row, index) => {
+    if (
+      parseItemRow(row.text) !== null ||
+      parseCurrencyDetailRow(row) !== null ||
+      parsePriceQuantityDetailRow(row) !== null
+    ) {
+      return true;
+    }
+    if (!parseStandalonePriceRow(row)) return false;
+    return rows.slice(Math.max(0, index - 2), index).some((candidate) => {
+      const text = candidate.text.trim();
+      return meaningfulItemName(text) && !NON_MERCHANT.test(text) && trailingMoney(text) === null;
+    });
+  });
+  if (firstDataIndex < 0) return [];
+  const startIndex = headerIndex >= 0 ? headerIndex + 1 : Math.max(0, firstDataIndex - 2);
+  const items: ParsedLayoutItem[] = [];
+  let pendingNames: OcrRow[] = [];
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const row = rows[index]!;
+    if (isTableHeader(row)) {
+      pendingNames = [];
+      continue;
+    }
+    const parsed = parseLayoutRow(row, quantityColumnX);
+    if (parsed) {
+      const pendingName = pendingNames.at(-1);
+      const pendingIdentity = pendingName ? pendingItemIdentity(pendingName.text) : null;
+      const name = meaningfulItemName(parsed.name) ? parsed.name : pendingIdentity?.name ?? "";
+      if (meaningfulItemName(name)) {
+        items.push({
+          ...parsed,
+          name,
+          quantity:
+            parsed.name || !pendingIdentity || parsed.quantity !== 1
+              ? parsed.quantity
+              : pendingIdentity.quantity,
+          score: clampConfidence(
+            pendingName ? (parsed.score + pendingName.score) / 2 : parsed.score,
+          ),
+        });
+      }
+      pendingNames = [];
+      continue;
+    }
+
+    const text = row.text.replace(/\s+/g, " ").trim();
+    const plausibleNameOnly =
+      meaningfulItemName(text) &&
+      trailingMoney(text) === null &&
+      !NON_MERCHANT.test(text) &&
+      !NON_ITEM_LABEL.test(text.replace(/:$/, "").trim()) &&
+      !/^(?:nominal\s+belanja|thank\s+you|date|tanggal|waktu|kasir|customer|server|meja)\b/i.test(text);
+    if (plausibleNameOnly) pendingNames = [...pendingNames.slice(-1), row];
+  }
+
+  return items;
 }
 
 function extractColumnItems(lines: OcrLine[]) {
@@ -222,8 +500,10 @@ function extractColumnItems(lines: OcrLine[]) {
     .map(positionLine)
     .filter((line): line is PositionedLine => line !== null)
     .sort((a, b) => a.centerY - b.centerY || a.left - b.left);
-  const summaryStart =
-    groupOcrLinesIntoRows(lines).find((row) => summaryKind(row.text) !== null)?.centerY ?? Infinity;
+  const summaryRow = groupOcrLinesIntoRows(lines).find((row) => summaryKind(row.text) !== null);
+  const summaryStart = summaryRow
+    ? summaryRow.top - Math.max(1, summaryRow.bottom - summaryRow.top) * 0.35
+    : Infinity;
   const itemHeader = positioned
     .filter(
       (line) =>
@@ -330,7 +610,14 @@ function findMerchant(rows: OcrRow[], firstItemIndex: number) {
 
 export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
   const rows = groupOcrLinesIntoRows(lines);
+  const layoutItems = extractLayoutItems(lines);
   const columnItems = extractColumnItems(lines);
+  const structuredItems =
+    layoutItems.length > columnItems.length
+      ? layoutItems
+      : columnItems.length > 0
+        ? columnItems
+        : layoutItems;
   const firstItemIndex = rows.findIndex((row) => parseItemRow(row.text) !== null);
   const merchant = findMerchant(rows, firstItemIndex < 0 ? rows.length : firstItemIndex);
   const items: EditableReceipt["items"] = [];
@@ -370,7 +657,7 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
       continue;
     }
 
-    if (columnItems.length > 0) continue;
+    if (structuredItems.length > 0) continue;
     const parsed = parseItemRow(row.text);
     if (!parsed) continue;
     const itemName = parsed.name.slice(0, 120);
@@ -394,8 +681,8 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
     });
   }
 
-  if (columnItems.length > 0) {
-    for (const parsed of columnItems) {
+  if (structuredItems.length > 0) {
+    for (const parsed of structuredItems) {
       const itemName = parsed.name.slice(0, 120);
       const nameConfidence = parsed.name.length > 120 ? Math.min(parsed.score, 0.4) : parsed.score;
       const unitPrice =
@@ -487,6 +774,18 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
     chargeConfidence.receiptTotal = 0.35;
   }
 
+  if (charges.statedSubtotal > 0) {
+    const itemGap = Math.abs(calculatedSubtotal - charges.statedSubtotal);
+    const mismatchRatio = itemGap / charges.statedSubtotal;
+    if (mismatchRatio > 0.05) {
+      for (const item of items) {
+        item.confidence.name = Math.min(item.confidence.name, 0.62);
+        item.confidence.unitPrice = Math.min(item.confidence.unitPrice, 0.55);
+        item.confidence.lineTotal = Math.min(item.confidence.lineTotal, 0.55);
+      }
+    }
+  }
+
   return {
     merchantName: merchant?.text ?? "Nama tempat belum terbaca",
     merchantConfidence: merchant?.score ?? 0,
@@ -495,4 +794,72 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
     chargeConfidence,
     source: "ocr",
   };
+}
+
+export type ReceiptScanAssessment = {
+  score: number;
+  itemSubtotal: number;
+  coverage: number | null;
+  mismatchRatio: number | null;
+  suspiciousNames: number;
+  shouldEnhance: boolean;
+};
+
+/** Scores structure quality, not bill correctness. OCR remains editable input. */
+export function assessReceiptScan(receipt: EditableReceipt): ReceiptScanAssessment {
+  const itemSubtotal = receipt.items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const statedSubtotal = receipt.charges.statedSubtotal;
+  const hasTrustedSubtotal =
+    statedSubtotal > 0 && receipt.chargeConfidence.statedSubtotal >= 0.68;
+  const hasTrustedTotal =
+    receipt.charges.receiptTotal > 0 && receipt.chargeConfidence.receiptTotal >= 0.68;
+  const coverage = hasTrustedSubtotal ? itemSubtotal / statedSubtotal : null;
+  const mismatchRatio = coverage === null ? null : Math.abs(1 - coverage);
+  const suspiciousNames = receipt.items.filter(
+    (item) =>
+      !meaningfulItemName(item.name) ||
+      /^(?:rp\.?|idr)?\s*[\d.,]+$/i.test(item.name.trim()),
+  ).length;
+  const confidenceValues = receipt.items.flatMap((item) => Object.values(item.confidence));
+  const averageConfidence = confidenceValues.length
+    ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+    : 0;
+  const reconciliationScore = mismatchRatio === null
+    ? 2
+    : Math.max(0, 48 - Math.min(1, mismatchRatio) * 60);
+  const score =
+    Math.min(24, receipt.items.length * 2.5) +
+    averageConfidence * 28 +
+    reconciliationScore -
+    suspiciousNames * 12 +
+    (hasTrustedTotal ? 6 : 0);
+  return {
+    score,
+    itemSubtotal,
+    coverage,
+    mismatchRatio,
+    suspiciousNames,
+    shouldEnhance:
+      suspiciousNames > 0 ||
+      !hasTrustedSubtotal ||
+      !hasTrustedTotal ||
+      (mismatchRatio !== null && mismatchRatio > 0.08) ||
+      (receipt.items.length <= 2 && statedSubtotal > itemSubtotal * 1.5),
+  };
+}
+
+export function selectBestReceiptCandidate(candidates: EditableReceipt[]) {
+  if (candidates.length === 0) throw new Error("ocr_no_items");
+  return candidates
+    .map((receipt) => ({ receipt, assessment: assessReceiptScan(receipt) }))
+    .sort((a, b) => {
+      const bothUnanchored = a.assessment.coverage === null && b.assessment.coverage === null;
+      if (bothUnanchored && a.receipt.items.length !== b.receipt.items.length) {
+        return b.receipt.items.length - a.receipt.items.length;
+      }
+      return (
+        b.assessment.score - a.assessment.score ||
+        b.receipt.items.length - a.receipt.items.length
+      );
+    })[0]!.receipt;
 }

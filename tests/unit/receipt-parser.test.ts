@@ -3,8 +3,10 @@ import { normalizeAiReceipt } from "@/domain/receipt/normalize";
 import { CloudflareReceiptParserProvider } from "@/features/receipt-parser/cloudflare-provider";
 import { MockReceiptParserProvider } from "@/features/receipt-parser/mock-provider";
 import {
+  assessReceiptScan,
   groupOcrLinesIntoRows,
   receiptFromOcrLines,
+  selectBestReceiptCandidate,
   type OcrLine,
 } from "@/features/receipt-parser/paddle-receipt-parser";
 import {
@@ -366,6 +368,158 @@ describe("receipt parser boundary", () => {
       rounding: 1,
       receiptTotal: 8_000,
     });
+  });
+
+  it("parses a Senandika-style item, quantity, unit-price, and total table", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("WARUNG KOPI & RESTO SENANDIKA", 10),
+      ocrLine("Item", 60, 20, 260),
+      ocrLine("Qty", 62, 340, 390),
+      ocrLine("Harga", 61, 450, 550),
+      ocrLine("Total", 63, 650, 800),
+      ocrLine("Nasi Goreng", 100, 20, 260),
+      ocrLine("2", 102, 350, 375),
+      ocrLine("Rp 25.000", 101, 450, 560),
+      ocrLine("Rp 50.000", 103, 650, 800),
+      ocrLine("Ayam Sambal Matah", 140, 20, 300),
+      ocrLine("1", 142, 350, 375),
+      ocrLine("Rp 45.000", 141, 450, 560),
+      ocrLine("Rp 45.000", 143, 650, 800),
+      ocrLine("Es Teh", 180, 20, 240),
+      ocrLine("3", 182, 350, 375),
+      ocrLine("Rp 8.000", 181, 450, 560),
+      ocrLine("Rp 24.000", 183, 650, 800),
+      ocrLine("Subtotal", 240, 20, 260),
+      ocrLine("Rp 119.000", 242, 650, 800),
+      ocrLine("PB1", 280, 20, 260),
+      ocrLine("Rp 11.900", 282, 650, 800),
+      ocrLine("Total", 320, 20, 260),
+      ocrLine("Rp 130.900", 322, 650, 800),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "Nasi Goreng", quantity: 2, unitPrice: 25_000, lineTotal: 50_000 },
+      { name: "Ayam Sambal Matah", quantity: 1, unitPrice: 45_000, lineTotal: 45_000 },
+      { name: "Es Teh", quantity: 3, unitPrice: 8_000, lineTotal: 24_000 },
+    ]);
+    expect(receipt.items.every((item) => !/^(?:rp|idr|[\d.,]+)$/i.test(item.name))).toBe(true);
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 119_000,
+      tax: 11_900,
+      receiptTotal: 130_900,
+    });
+  });
+
+  it("pairs Nakoja-style item names with following quantity and IDR detail rows", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("NAKOJA", 10),
+      ocrLine("Beranda Matcha - Ice Large", 80, 20, 520),
+      ocrLine("1 x IDR 29.091", 108, 40, 390),
+      ocrLine("IDR 29.091", 110, 650, 800),
+      ocrLine("Caramel Macchiato - Ice Regular", 145, 20, 560),
+      ocrLine("1 x IDR 23.636", 173, 40, 390),
+      ocrLine("IDR 23.636", 175, 650, 800),
+      ocrLine("Korean Salt Bread", 210, 20, 430),
+      ocrLine("1 x IDR 10.909", 238, 40, 390),
+      ocrLine("IDR 10.909", 240, 650, 800),
+      ocrLine("Subtotal", 290, 20, 250),
+      ocrLine("IDR 63.636", 292, 650, 800),
+      ocrLine("Pajak Daerah PB 1 (10%)", 330, 20, 450),
+      ocrLine("IDR 6.364", 332, 650, 800),
+      ocrLine("TOTAL", 380, 20, 250),
+      ocrLine("IDR 70.000", 382, 650, 800),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "Beranda Matcha - Ice Large", quantity: 1, lineTotal: 29_091 },
+      { name: "Caramel Macchiato - Ice Regular", quantity: 1, lineTotal: 23_636 },
+      { name: "Korean Salt Bread", quantity: 1, lineTotal: 10_909 },
+    ]);
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 63_636,
+      tax: 6_364,
+      receiptTotal: 70_000,
+    });
+  });
+
+  it("pairs CORD bakery names with following unit-price x quantity rows", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("4005-Maple glazed", 40),
+      ocrLine("25.000 x1 25.000", 70),
+      ocrLine("6001-Plastic Bag Small", 100),
+      ocrLine("0 x1 0", 130),
+      ocrLine("Total Item: 2", 170),
+      ocrLine("Total. 25.000", 200),
+      ocrLine("Tendered: 50.000", 230),
+      ocrLine("Change: 25.000", 260),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "4005-Maple glazed", quantity: 1, lineTotal: 25_000 },
+      { name: "6001-Plastic Bag Small", quantity: 1, lineTotal: 0 },
+    ]);
+    expect(receipt.charges.receiptTotal).toBe(25_000);
+  });
+
+  it("parses a CORD item name followed by quantity x unit and total", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("THAI ICED TEA (L)", 40),
+      ocrLine("1 X 16,363 16,363", 70),
+      ocrLine("Jumlah Item : 1", 110),
+      ocrLine("Sub Total : 16,363", 140),
+      ocrLine("Pajak Resto : 1,636", 170),
+      ocrLine("Grand Total : 17,999", 200),
+    ]);
+
+    expect(receipt.items).toMatchObject([
+      { name: "THAI ICED TEA (L)", quantity: 1, lineTotal: 16_363 },
+    ]);
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 16_363,
+      tax: 1_636,
+      receiptTotal: 17_999,
+    });
+  });
+
+  it("normalizes CORD decimal-formatted rupiah without multiplying by one hundred", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("1 Berry Many-Low (P) 37,500.00", 40),
+      ocrLine("1 500 days of summer (P) 37,500.00", 70),
+      ocrLine("1 sun kissed (P) 37,500.00", 100),
+      ocrLine("1 PLASTIC BAG 500.00", 130),
+      ocrLine("SubTotal 113,000.00", 170),
+      ocrLine("Total 113,000.00", 200),
+    ]);
+
+    expect(receipt.items.map((item) => item.lineTotal)).toEqual([
+      37_500,
+      37_500,
+      37_500,
+      500,
+    ]);
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 113_000,
+      receiptTotal: 113_000,
+    });
+  });
+
+  it("requests an enhanced pass for incomplete rows and chooses the reconciled candidate", () => {
+    const incomplete = receiptFromOcrLines([
+      ocrLine("1 Menu A 20,000", 80),
+      ocrLine("Subtotal 100,000", 180),
+      ocrLine("Total 100,000", 220),
+    ]);
+    const complete = receiptFromOcrLines([
+      ocrLine("1 Menu A 20,000", 80),
+      ocrLine("1 Menu B 30,000", 120),
+      ocrLine("1 Menu C 50,000", 160),
+      ocrLine("Subtotal 100,000", 220),
+      ocrLine("Total 100,000", 260),
+    ]);
+
+    expect(assessReceiptScan(incomplete).shouldEnhance).toBe(true);
+    expect(assessReceiptScan(complete).shouldEnhance).toBe(false);
+    expect(selectBestReceiptCandidate([incomplete, complete]).items).toHaveLength(3);
   });
 
   it("reconciles a common tax amount when OCR attaches it to the rounding label", () => {

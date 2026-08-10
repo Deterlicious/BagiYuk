@@ -3,6 +3,36 @@
 Status: completed
 Last updated: 10 August 2026
 
+## Advanced local receipt intelligence
+
+- Keep PP-OCRv6 as the credential-free recognition engine, but treat OCR text and receipt structure as separate stages with independent validation.
+- Generate a normal grayscale crop and a stronger high-contrast crop from the same in-memory photo. Run the normal pass first and only scan the enhanced variant when item coverage or reconciliation indicates that the first result is incomplete.
+- Score OCR candidates using item count, name quality, confidence, and agreement between detected line totals and the printed subtotal. Never prefer a candidate merely because it contains more text.
+- Extend the deterministic layout parser for POS tables whose item name, quantity, unit price, and line total are returned as separate OCR boxes or as a single row with two price columns.
+- Accept Indonesian currency prefixes while preventing standalone prices, tax rows, payment rows, and table headers from becoming item names.
+- Surface a scan-health message during mandatory verification: exact subtotal agreement, likely missing rows, or likely duplicated/misaligned prices.
+- Mark arithmetic mismatches as low-confidence editable input so users cannot silently continue with a structurally suspicious scan.
+- Add regression fixtures based on the supplied Senandika and Nakoja table layouts, plus candidate-quality and conditional-retry tests.
+
+Research basis (10 August 2026): PaddleOCR's official document preprocessing pipeline recommends orientation correction and geometric unwarping before OCR, while PP-StructureV3 is the official heavier option for structured documents. BagiYuk adopts the same preprocessing/structure separation without adding a Python service, paid API, receipt-image upload, or another large browser model.
+
+Verification completed on 10 August 2026:
+
+- Regression fixtures for Senandika-style four-column tables and Nakoja-style name/detail rows parse their item names, quantities, `Rp`/`IDR` prices, PB1, subtotal, and total without turning prices into names.
+- A real Meatsmith receipt completed in the mobile browser with 7/7 items, exact Rp2,845,000 subtotal reconciliation, and exact Rp3,157,950 total.
+- The adaptive enhancement stage is visible during scanning, while already reconciled one-pass receipts do not incur the second OCR inference.
+- A forced Rp155,000 item/subtotal gap produced the specific missing-row warning; 390×844 and 1440×1000 browser QA had no horizontal overflow or console errors.
+- TypeScript, ESLint, 41 Vitest checks, the Next/OpenNext build, workerd HTTP checks, and ten Playwright scenarios pass.
+
+## CORD dataset evaluation
+
+- Use the CC-BY-4.0 Voxel51 CORD mirror as an evaluation corpus, not as production data or a browser download.
+- Convert all 800 annotated OCR boxes into the same coordinate/text boundary consumed by the BagiYuk parser, then measure parse success, exact item count, subtotal, tax, service, rounding, and total accuracy.
+- Cache the 5.7 MB annotation file and selected images under the ignored `.cache/cord` directory; do not commit the 1.3 GB dataset or receipt images.
+- Select a deterministic stratified image subset covering few/many items, service/tax, rounding, narrow/tall layouts, and varied image sizes for end-to-end browser OCR checks.
+- Store a machine-readable local benchmark report and document the dataset revision, limitations, commands, and observed results.
+- Treat CORD as a post-OCR parsing benchmark first: its manually verified text boxes do not by themselves measure PaddleOCR recognition quality.
+
 ## Professional experience upgrade
 
 - Strengthen receipt-scan trust with a visible photo-quality checklist, clearer review counts for low-confidence fields, and reconciliation guidance before continuing.

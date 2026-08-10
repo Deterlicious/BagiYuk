@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, ArrowRight, CopyPlus, Plus, ReceiptText, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CircleCheckBig, CopyPlus, Plus, ReceiptText, ScanSearch, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MoneyInput } from "@/components/ui/money-input";
@@ -72,6 +72,11 @@ export function VerificationStep({
     receipt.charges.serviceCharge -
     receipt.charges.discount +
     receipt.charges.rounding;
+  const scanSubtotalGap = calculatedSubtotal - receipt.charges.statedSubtotal;
+  const hasTrustedScanSubtotal = receipt.chargeConfidence.statedSubtotal >= confidenceThreshold;
+  const scanCoverage = hasTrustedScanSubtotal && receipt.charges.statedSubtotal > 0
+    ? Math.round((calculatedSubtotal / receipt.charges.statedSubtotal) * 100)
+    : null;
 
   function updateItem(id: string, changes: Partial<EditableReceiptItem>) {
     const nextItems = receipt.items.map((item) => {
@@ -200,6 +205,44 @@ export function VerificationStep({
         </div>
         {lowConfidenceCount > 0 && <Button variant="secondary" size="small" onClick={confirmLowConfidenceFields}>Tandai sudah diperiksa</Button>}
       </div>
+
+      {receipt.source === "ocr" && (
+        <div
+          className={cn(
+            "mt-4 rounded-2xl border p-4 sm:p-5",
+            hasTrustedScanSubtotal && scanSubtotalGap === 0
+              ? "border-success/25 bg-[#edf7f2]"
+              : "border-warning/30 bg-amber-50",
+          )}
+          role="status"
+        >
+          <div className="flex items-start gap-3">
+            {hasTrustedScanSubtotal && scanSubtotalGap === 0 ? (
+              <CircleCheckBig className="mt-0.5 shrink-0 text-success" aria-hidden="true" size={21} />
+            ) : (
+              <ScanSearch className="mt-0.5 shrink-0 text-warning" aria-hidden="true" size={21} />
+            )}
+            <div>
+              <p className="font-extrabold">
+                {!hasTrustedScanSubtotal
+                  ? `${receipt.items.length} item ditemukan · subtotal perlu dicek`
+                  : scanSubtotalGap === 0
+                  ? `${receipt.items.length} item cocok dengan subtotal struk`
+                  : `${receipt.items.length} item terdeteksi · kecocokan ${scanCoverage ?? "—"}%`}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                {!hasTrustedScanSubtotal
+                  ? "Subtotal tercetak belum terbaca dengan yakin. Nilai sementara berasal dari jumlah item—cocokkan dengan struk dan tambahkan baris yang terlewat."
+                  : scanSubtotalGap === 0
+                  ? "Jumlah seluruh item sama persis dengan subtotal tercetak. Tetap cocokkan nama, jumlah, dan harga sebelum lanjut."
+                  : scanSubtotalGap < 0
+                    ? `Masih kurang ${formatRupiah(Math.abs(scanSubtotalGap))} dari subtotal tercetak. Kemungkinan ada baris item yang belum terbaca.`
+                    : `Hasil item lebih besar ${formatRupiah(scanSubtotalGap)} dari subtotal tercetak. Periksa harga yang mungkin terbaca ganda atau bergeser kolom.`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0">

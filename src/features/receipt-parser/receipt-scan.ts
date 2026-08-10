@@ -11,6 +11,7 @@ export const receiptScanStages: Array<{
   { id: "preparing", label: "Menyiapkan foto", detail: "Memotong dan memperjelas struk" },
   { id: "loading-model", label: "Menyalakan pemindai", detail: "Unduhan pertama bisa memerlukan waktu" },
   { id: "reading", label: "Membaca tulisan", detail: "Mendeteksi item, jumlah, dan harga" },
+  { id: "enhancing", label: "Memperjelas hasil", detail: "Mencoba ulang bagian yang belum cocok" },
   { id: "finishing", label: "Menyusun hasil", detail: "Menyiapkan data untuk kamu periksa" },
 ];
 

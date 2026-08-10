@@ -1,10 +1,19 @@
-import { prepareReceiptImage } from "@/lib/image-client";
-import { receiptFromOcrLines } from "./paddle-receipt-parser";
+import { prepareReceiptImageVariants } from "@/lib/image-client";
+import {
+  assessReceiptScan,
+  receiptFromOcrLines,
+  selectBestReceiptCandidate,
+} from "./paddle-receipt-parser";
 
 type PaddleModule = typeof import("@paddleocr/paddleocr-js");
 type PaddleInstance = Awaited<ReturnType<PaddleModule["PaddleOCR"]["create"]>>;
 
-export type ReceiptScanStage = "preparing" | "loading-model" | "reading" | "finishing";
+export type ReceiptScanStage =
+  | "preparing"
+  | "loading-model"
+  | "reading"
+  | "enhancing"
+  | "finishing";
 
 let paddlePromise: Promise<PaddleInstance> | null = null;
 
@@ -52,20 +61,57 @@ export async function parseReceiptInBrowser(
 ) {
   signal?.throwIfAborted();
   onStage?.("preparing");
-  const prepared = await prepareReceiptImage(file);
+  const preparedVariants = await prepareReceiptImageVariants(file);
+  const primaryImage = preparedVariants[0] ?? file;
   signal?.throwIfAborted();
   onStage?.("loading-model");
   const ocr = await getPaddleOcr();
   signal?.throwIfAborted();
   onStage?.("reading");
-  const [result] = await ocr.predict(prepared, {
+  const [result] = await ocr.predict(primaryImage, {
     textDetLimitSideLen: 2_400,
     textDetLimitType: "max",
     textDetMaxSideLimit: 3_200,
-    textRecScoreThresh: 0.32,
+    textDetThresh: 0.25,
+    textDetBoxThresh: 0.42,
+    textDetUnclipRatio: 1.8,
+    textRecScoreThresh: 0.27,
   });
   signal?.throwIfAborted();
   if (!result) throw new Error("ocr_empty_result");
+  const candidates = [];
+  let primaryError: unknown = null;
+  try {
+    candidates.push(receiptFromOcrLines(result.items));
+  } catch (error) {
+    primaryError = error;
+  }
+
+  const primaryNeedsEnhancement =
+    candidates.length === 0 || assessReceiptScan(candidates[0]!).shouldEnhance;
+  const enhancedImage = preparedVariants[1];
+  if (primaryNeedsEnhancement && enhancedImage && enhancedImage !== primaryImage) {
+    signal?.throwIfAborted();
+    onStage?.("enhancing");
+    const [enhancedResult] = await ocr.predict(enhancedImage, {
+      textDetLimitSideLen: 2_800,
+      textDetLimitType: "max",
+      textDetMaxSideLimit: 3_200,
+      textDetThresh: 0.2,
+      textDetBoxThresh: 0.34,
+      textDetUnclipRatio: 1.95,
+      textRecScoreThresh: 0.22,
+    });
+    signal?.throwIfAborted();
+    if (enhancedResult) {
+      try {
+        candidates.push(receiptFromOcrLines(enhancedResult.items));
+      } catch {
+        // Keep the primary candidate when the enhanced pass only adds noise.
+      }
+    }
+  }
+  if (candidates.length === 0) throw primaryError ?? new Error("ocr_no_items");
   onStage?.("finishing");
-  return receiptFromOcrLines(result.items);
+  return selectBestReceiptCandidate(candidates);
 }

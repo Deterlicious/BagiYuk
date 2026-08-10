@@ -40,6 +40,8 @@ pnpm typecheck    # strict TypeScript
 pnpm lint         # ESLint and Next.js rules
 pnpm test         # deterministic domain/provider unit tests
 pnpm test:e2e     # Playwright mobile and desktop journeys
+pnpm benchmark:cord:fetch # cache CORD annotations + eight-image subset
+pnpm benchmark:cord       # evaluate 800 annotated Indonesian receipts
 pnpm screenshots  # refresh visual QA captures while dev server is running
 pnpm build        # Next.js production build
 pnpm cf:build     # OpenNext build + Cloudflare asset pruning
@@ -56,7 +58,7 @@ pnpm cf-typegen   # regenerate Cloudflare binding types
 - The Next.js App Router handles the homepage, wizard, manifest, and server parse route. OpenNext packages it for Cloudflare Workers.
 - Base UI powers the accessible reset alert dialog; shadcn's `base-nova` configuration and local UI components keep the design system small.
 
-See [implementation plan](docs/implementation-plan.md), [OCR boundary](docs/ai-usage.md), [deployment](docs/deployment.md), and [pinned versions](docs/stack-versions.md).
+See [implementation plan](docs/implementation-plan.md), [OCR boundary](docs/ai-usage.md), [CORD benchmark](docs/ocr-benchmark.md), [deployment](docs/deployment.md), and [pinned versions](docs/stack-versions.md).
 
 ## Screenshots
 

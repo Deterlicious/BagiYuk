@@ -7,6 +7,7 @@ test-results/
 playwright-report/
 blob-report/
 coverage/
+.cache/
 .env
 .env.local
 .dev.vars
