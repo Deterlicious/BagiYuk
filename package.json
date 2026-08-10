@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:ocr-service": "python -m unittest discover -s services/receipt-ocr/tests -t services/receipt-ocr -p test_*.py",
     "benchmark:cord": "vitest run --config vitest.cord.config.ts",
     "benchmark:cord:fetch": "node scripts/fetch-cord-benchmark.mjs",
     "test:watch": "vitest",

@@ -65,7 +65,7 @@ export default function HomePage() {
           <div className="mt-9 flex max-w-[620px] items-start gap-3 border-t border-dashed border-line pt-5 text-sm leading-6 text-muted">
             <LockKeyhole className="mt-0.5 shrink-0 text-brand" aria-hidden="true" size={18} />
             <p>
-              Gambar struk diproses langsung di perangkatmu, tidak diunggah, dan tidak disimpan permanen.
+              Pemindai pintar memproses foto sementara di layanan privat; jika tidak tersedia, OCR berjalan di perangkat. Foto tidak disimpan permanen.
             </p>
           </div>
         </div>

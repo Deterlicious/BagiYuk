@@ -38,7 +38,7 @@ describe("receipt parser boundary", () => {
   it("normalizes deterministic mock output into editable integer rupiah", async () => {
     const raw = await new MockReceiptParserProvider().parse({
       mimeType: "image/png",
-      base64: "ignored-by-mock",
+      bytes: new Uint8Array(),
     });
     const receipt = normalizeAiReceipt(raw);
 
@@ -104,7 +104,7 @@ describe("receipt parser boundary", () => {
     });
     const parsed = await new CloudflareReceiptParserProvider({ run }).parse({
       mimeType: "image/jpeg",
-      base64: "receipt",
+      bytes: new Uint8Array([1]),
     });
 
     expect(parsed.items).toHaveLength(2);
@@ -133,7 +133,7 @@ describe("receipt parser boundary", () => {
       });
     const parsed = await new CloudflareReceiptParserProvider({ run }).parse({
       mimeType: "image/jpeg",
-      base64: "receipt",
+      bytes: new Uint8Array([1]),
     });
 
     expect(parsed.items[0]!.lineTotal.value).toBe(198_000);
@@ -158,7 +158,7 @@ describe("receipt parser boundary", () => {
     });
     await new CloudflareReceiptParserProvider({ run }).parse({
       mimeType: "image/jpeg",
-      base64: "receipt",
+      bytes: new Uint8Array([1]),
       width: 900,
       height: 2_800,
     });

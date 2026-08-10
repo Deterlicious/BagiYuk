@@ -114,3 +114,58 @@ test("professional shortcuts, individual share, and help remain accessible", asy
   await expect(page.getByRole("heading", { name: "Hasil yang akurat dimulai dari pemeriksaan yang jelas." })).toBeVisible();
   await expect(page.getByText("Privasi struk", { exact: true })).toBeVisible();
 });
+
+test("server quota explains the local fallback without blocking manual recovery", async ({ page }) => {
+  await page.route("**/api/receipts/parse", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          enabled: true,
+          turnstileSiteKey: "test-site-key",
+          limits: {
+            deviceDaily: 3,
+            deviceMonthly: 20,
+            networkDaily: 10,
+            networkMonthly: 50,
+            globalMonthly: 800,
+          },
+          maxUploadBytes: 4 * 1024 * 1024,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 429,
+      contentType: "application/json",
+      headers: { "retry-after": "60" },
+      body: JSON.stringify({
+        error: { code: "quota_device_daily", message: "Kuota pemindai pintar sudah habis." },
+      }),
+    });
+  });
+  await page.route("**/turnstile/v0/api.js**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/javascript",
+      body: `window.turnstile={render:function(el,o){setTimeout(function(){o.callback('test-token')},0);return 'widget'},remove:function(){}};`,
+    }),
+  );
+
+  await page.goto("/split/new?fresh=1");
+  await expect(page.getByText(/maksimal 3 scan per hari/)).toBeVisible();
+  await page.locator('input[type="file"]').nth(1).setInputFiles({
+    name: "receipt.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
+
+  await expect(page.getByText("Beralih ke perangkat", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Kuota pemindai pintar habis/)).toBeVisible();
+  await page.getByRole("button", { name: "Batalkan scan" }).click();
+  await expect(page.getByRole("button", { name: "Masukkan manual" })).toBeVisible();
+});

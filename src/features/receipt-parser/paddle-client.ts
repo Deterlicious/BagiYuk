@@ -10,6 +10,8 @@ type PaddleInstance = Awaited<ReturnType<PaddleModule["PaddleOCR"]["create"]>>;
 
 export type ReceiptScanStage =
   | "preparing"
+  | "server-reading"
+  | "local-fallback"
   | "loading-model"
   | "reading"
   | "enhancing"

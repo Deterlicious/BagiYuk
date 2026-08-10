@@ -1,7 +1,29 @@
 # BagiYuk MVP Implementation Plan
 
-Status: completed
-Last updated: 10 August 2026
+Status: implementation and local verification complete; production Cloud Run activation awaits a billing-enabled Google Cloud project
+Last updated: 11 August 2026
+
+## Protected Cloud Run receipt intelligence
+
+- Keep the complete browser OCR and manual flows as credential-free fallbacks, but prefer the official pretrained PP-OCRv6 small server pipeline when configured; evaluate the medium weights only after measuring memory and p95 latency.
+- Do not deploy full PP-StructureV3 on the free tier: its official lightweight CPU benchmark peaks near 13 GiB RAM and would undermine the billing guardrail. Use its trained general OCR pipeline with document and text-line orientation plus BagiYuk's deterministic layout parser instead.
+- Add a small Python/FastAPI container that validates images in memory, corrects orientation, runs the pretrained CPU pipeline, returns only untrusted text/confidence/polygon JSON, and never writes receipt images to disk or logs their contents.
+- Place the service behind the existing Cloudflare Worker API and private Google IAM. The Worker mints a short-lived service-account ID token so clients cannot bypass Cloudflare quotas by calling the container URL directly.
+- Replace isolate-local rate limiting with persistent D1 reservations: three server scans per anonymous device per day and twenty per month; ten per network per day and fifty per month; eight hundred accepted server attempts globally per month; plus a short burst ceiling. Hash network identifiers with a server secret and store only opaque counters.
+- Require a single-use Cloudflare Turnstile token for every remote scan and validate its hostname/action at the Worker before reserving quota.
+- Validate the request before spending quota: accepted image signatures only, at most 4 MiB, sane dimensions, at most 20 megapixels, one image per request, and bounded upstream/body timeouts.
+- Return quota headers and an Indonesian recovery message with the next reset time. When server OCR is unavailable, limited, or unconfigured, transparently offer local OCR and manual entry without weakening the split flow.
+- Configure Cloud Run for request-based billing, no GPU, minimum instances zero, maximum instances one, concurrency one, 1 vCPU/2 GiB, a 90-second request timeout, and no unauthenticated direct access. Keep a stricter application timeout because a platform timeout alone does not terminate container work.
+- Add unit tests for quota windows, atomic limits, spoofed headers, image signatures/dimensions, upstream errors, and provider output validation; add an E2E scenario for quota recovery UI.
+- Document one-time D1, Cloudflare secret, Google Cloud project/billing, container deployment, budget alert, and rollback procedures. Never commit generated secrets or credentials.
+
+Verification completed on 11 August 2026:
+
+- The Linux image build verifies pinned model checksums and runs real PP-OCRv6 inference with PaddleOCR 3.7.0, PaddleX 3.7.2, and PaddlePaddle 3.2.2; the incompatible 3.3.1 runtime was rejected after a real oneDNN inference failure.
+- The final image is about 583 MB uncompressed, runs as `appuser`, starts with a read-only root filesystem, and uses an ephemeral `/tmp` cache.
+- Four supplied real receipts produced 26, 122, 29, and 68 OCR lines in 2.56–12.54 seconds on the 1-vCPU profile. Ten consecutive scans averaged 1.9 seconds with memory stable near 800 MiB, below the 2-GiB limit.
+- D1 migrations and the Turnstile widget are provisioned in Cloudflare production. The provider remains intentionally `disabled` until private Cloud Run IAM, URL, invoker identity, and Google secret are available.
+- TypeScript, ESLint, 51 Vitest checks, dependency-free Python boundary checks, container smoke inference, and 12 Playwright mobile/desktop scenarios pass. The remaining external blocker is that the authenticated Google account has no billing-enabled project or billing account.
 
 ## Advanced local receipt intelligence
 
@@ -14,7 +36,7 @@ Last updated: 10 August 2026
 - Mark arithmetic mismatches as low-confidence editable input so users cannot silently continue with a structurally suspicious scan.
 - Add regression fixtures based on the supplied Senandika and Nakoja table layouts, plus candidate-quality and conditional-retry tests.
 
-Research basis (10 August 2026): PaddleOCR's official document preprocessing pipeline recommends orientation correction and geometric unwarping before OCR, while PP-StructureV3 is the official heavier option for structured documents. BagiYuk adopts the same preprocessing/structure separation without adding a Python service, paid API, receipt-image upload, or another large browser model.
+Research basis (10 August 2026): PaddleOCR's official document preprocessing pipeline recommends orientation correction before OCR, while PP-StructureV3 is the official heavier option for structured documents. This section records the earlier browser-only implementation; the protected Cloud Run plan above supersedes its former no-Python/no-upload constraint while retaining browser OCR as fallback.
 
 Verification completed on 10 August 2026:
 
@@ -74,7 +96,7 @@ Hotfix verification completed on 7 August 2026:
 - Start OCR automatically as soon as a valid camera/gallery image is selected so the upload action has an immediate, predictable result.
 - Keep validation errors visible even when no preview can be created, including files with missing browser MIME metadata.
 - Replace the single spinner with an accessible staged scan panel that explains preparation, engine loading, text recognition, and result assembly while showing elapsed time.
-- Offer cancel, retry, replace-photo, and manual-entry exits without persisting or uploading the receipt image.
+- Offer cancel, retry, replace-photo, and manual-entry exits without persisting the receipt image. Server upload is now optional, protected, metadata-free, and disclosed; local fallback remains on-device.
 - Add a bounded timeout and distinguish offline/model-load failures from receipts whose text cannot be structured.
 - Match the ONNX Runtime WebAssembly binary version to the installed runtime and keep the compatible single-thread worker path.
 - Add regression coverage for file validation and scan-progress behavior without imposing cross-origin isolation on generated worker assets.
@@ -147,7 +169,7 @@ Build a production-ready, mobile-first BagiYuk MVP that supports receipt image p
 - Persist only normalized draft JSON in local storage; keep selected image data in memory and discard it on reload/reset.
 - Make the pure domain calculator the only source of split totals. The UI and AI layer provide inputs but never calculate money independently.
 - Treat the entered receipt total as a reconciliation reference. Allocations use the sum of verified items plus explicit charges, preserving any mismatch for correction.
-- Keep the optional server provider on mock by default; production OCR is credential-free and runs in the browser.
+- Keep mock output development/test-only. Production fails closed with the provider disabled until the protected Cloud Run dependencies are configured; browser OCR and manual entry remain credential-free.
 
 ## Definition of done
 
@@ -181,5 +203,5 @@ Production scan UX follow-up completed on 7 August 2026:
 
 - The first OCR scan downloads roughly 31 MB of model files and therefore needs an internet connection; the complete manual flow remains available without it.
 - Unusual receipt layouts, faint thermal print, glare, or severely cropped images can still require manual correction.
-- Parse rate limiting is best effort per Worker isolate rather than distributed.
+- Protected server scans use persistent atomic D1 reservations plus device, network, burst, and global limits; local OCR and manual entry are unlimited.
 - Offline shell behavior is implemented but not included in the automated browser suite.

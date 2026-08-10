@@ -9,11 +9,29 @@ export const receiptScanStages: Array<{
   detail: string;
 }> = [
   { id: "preparing", label: "Menyiapkan foto", detail: "Memotong dan memperjelas struk" },
+  { id: "server-reading", label: "Membaca lebih teliti", detail: "Pemindai pintar memeriksa teks dan posisi" },
+  { id: "local-fallback", label: "Beralih ke perangkat", detail: "Pemindai lokal mengambil alih tanpa memakai kuota" },
   { id: "loading-model", label: "Menyalakan pemindai", detail: "Unduhan pertama bisa memerlukan waktu" },
   { id: "reading", label: "Membaca tulisan", detail: "Mendeteksi item, jumlah, dan harga" },
   { id: "enhancing", label: "Memperjelas hasil", detail: "Mencoba ulang bagian yang belum cocok" },
   { id: "finishing", label: "Menyusun hasil", detail: "Menyiapkan data untuk kamu periksa" },
 ];
+
+export type ReceiptScanPath = "local" | "server" | "fallback";
+
+export function receiptScanStagesFor(path: ReceiptScanPath) {
+  if (path === "server") {
+    return receiptScanStages.filter((stage) =>
+      ["preparing", "server-reading", "finishing"].includes(stage.id),
+    );
+  }
+  if (path === "local") {
+    return receiptScanStages.filter(
+      (stage) => stage.id !== "server-reading" && stage.id !== "local-fallback",
+    );
+  }
+  return receiptScanStages;
+}
 
 export function validateReceiptFile(file: File, maxBytes: number) {
   if (file.size === 0) return "Foto yang dipilih kosong. Pilih foto lain.";
@@ -30,8 +48,11 @@ export function validateReceiptFile(file: File, maxBytes: number) {
   return null;
 }
 
-export function scanStageIndex(stage: ReceiptScanStage) {
-  return receiptScanStages.findIndex((candidate) => candidate.id === stage);
+export function scanStageIndex(
+  stage: ReceiptScanStage,
+  stages = receiptScanStages,
+) {
+  return stages.findIndex((candidate) => candidate.id === stage);
 }
 
 export function scanErrorMessage(error: unknown, online: boolean) {

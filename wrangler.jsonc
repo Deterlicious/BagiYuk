@@ -8,14 +8,32 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "d1_databases": [
+    {
+      "binding": "OCR_QUOTA",
+      "database_name": "bagiyuk-ocr-quota",
+      "database_id": "c08d9cac-8faf-47c3-a3e9-50f0713f712e",
+      "migrations_dir": "migrations"
+    }
+  ],
   "vars": {
-    "RECEIPT_AI_PROVIDER": "mock"
+    "RECEIPT_AI_PROVIDER": "disabled"
   },
   "env": {
     "production": {
       "name": "bagiyuk",
+      "d1_databases": [
+        {
+          "binding": "OCR_QUOTA",
+          "database_name": "bagiyuk-ocr-quota",
+          "database_id": "c08d9cac-8faf-47c3-a3e9-50f0713f712e",
+          "migrations_dir": "migrations"
+        }
+      ],
       "vars": {
-        "RECEIPT_AI_PROVIDER": "mock"
+        "RECEIPT_AI_PROVIDER": "disabled",
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAEMWbJRe26o7qMOx",
+        "TURNSTILE_EXPECTED_HOSTNAME": "bagiyuk.vivoy51577.workers.dev"
       }
     }
   },

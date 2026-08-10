@@ -13,7 +13,7 @@ const guides = [
   { icon: Camera, title: "Foto yang mudah dibaca", text: "Letakkan struk di permukaan datar, gunakan cahaya merata, hindari bayangan, dan pastikan bagian total tidak terpotong." },
   { icon: ReceiptText, title: "Selalu periksa hasil scan", text: "OCR hanya membantu mengetik. Koreksi nama item, jumlah, harga, pajak, layanan, diskon, pembulatan, dan total sebelum melanjutkan." },
   { icon: Calculator, title: "Hitungan yang transparan", text: "Item bersama dibagi deterministik. Pajak dan layanan dibagi proporsional terhadap subtotal setiap orang, sampai rupiah terakhir." },
-  { icon: WifiOff, title: "Tetap bisa tanpa OCR", text: "Jika model belum terunduh, internet lambat, atau scan gagal, gunakan input manual dan lanjutkan seluruh alur seperti biasa." },
+  { icon: WifiOff, title: "Tetap bisa tanpa server", text: "Jika kuota pemindai pintar habis, internet lambat, atau server gagal, OCR lokal dan input manual tetap tersedia." },
 ];
 
 export default function HelpPage() {
@@ -48,7 +48,7 @@ export default function HelpPage() {
             <LockKeyhole className="mt-1 shrink-0 text-brand" aria-hidden="true" size={23} />
             <div>
               <h2 className="text-xl font-extrabold">Privasi struk</h2>
-              <p className="mt-2 text-sm leading-6 text-muted">Foto diproses di perangkat, tidak diunggah, tidak dimasukkan ke draft, dan tidak disimpan permanen. Draft hanya berisi data teks yang sudah dinormalisasi. Analytics hanya mencatat jenis interaksi yang telah dibatasi—tanpa foto, nama, nominal, atau isi struk.</p>
+              <p className="mt-2 text-sm leading-6 text-muted">Jika pemindai pintar aktif, salinan foto yang sudah dikompresi dikirim sementara ke layanan OCR privat dan langsung dibuang setelah request. Fallback OCR lokal tetap berada di perangkat. Foto tidak dimasukkan ke draft atau penyimpanan permanen; draft hanya berisi data teks yang sudah dinormalisasi. Analytics tidak menerima foto, nama, nominal, atau isi struk.</p>
             </div>
           </div>
         </section>
@@ -59,7 +59,7 @@ export default function HelpPage() {
             {[
               ["Kenapa total bisa berbeda?", "Biasanya subtotal item, pajak, layanan, diskon, pembulatan, atau total pada struk belum sesuai. BagiYuk menampilkan selisih dan tidak menyembunyikannya."],
               ["Apakah AI menentukan tagihan seseorang?", "Tidak. OCR hanya menghasilkan isian yang dapat diedit. Perhitungan akhir dilakukan oleh kalkulator deterministik dengan nominal rupiah integer."],
-              ["Kenapa scan pertama lebih lama?", "Model OCR perlu diunduh satu kali ke browser. Setelah tersimpan di cache, pemindaian berikutnya biasanya lebih cepat."],
+              ["Kenapa scan pertama lebih lama?", "Pemindai pintar dapat mengalami cold start. Jika beralih ke OCR lokal, model perlu diunduh sekali ke browser lalu digunakan kembali dari cache."],
               ["Apakah saya harus memasang aplikasi?", "Tidak. BagiYuk langsung berfungsi di browser. Instalasi PWA hanya membuat akses dari layar utama lebih nyaman."],
             ].map(([question, answer]) => (
               <details key={question} className="group p-5">

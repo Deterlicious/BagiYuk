@@ -2,14 +2,14 @@ import type { AiReceiptOutput } from "@/domain/receipt/schemas";
 
 export type ReceiptImage = {
   mimeType: "image/jpeg" | "image/png" | "image/webp";
-  base64: string;
+  bytes: Uint8Array;
   width?: number;
   height?: number;
 };
 
 export interface ReceiptParserProvider {
-  readonly name: "mock" | "cloudflare";
-  parse(image: ReceiptImage): Promise<AiReceiptOutput>;
+  readonly name: "mock" | "cloudflare" | "cloudrun";
+  parse(image: ReceiptImage, signal?: AbortSignal): Promise<AiReceiptOutput>;
 }
 
 export class ReceiptParserError extends Error {
@@ -18,7 +18,9 @@ export class ReceiptParserError extends Error {
       | "not_configured"
       | "provider_unavailable"
       | "invalid_output"
-      | "timeout",
+      | "timeout"
+      | "quota_unavailable"
+      | "challenge_failed",
     message: string,
   ) {
     super(message);

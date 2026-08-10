@@ -10,6 +10,7 @@ import {
   type ReceiptImage,
   type ReceiptParserProvider,
 } from "./provider";
+import { bytesToBase64 } from "@/lib/image";
 
 const DEFAULT_PRIMARY_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const DEFAULT_FALLBACK_MODEL = "@cf/moondream/moondream3.1-9B-A2B";
@@ -150,6 +151,7 @@ export class CloudflareReceiptParserProvider implements ReceiptParserProvider {
   ) {}
 
   private async runDocumentModel(image: ReceiptImage) {
+    const base64 = bytesToBase64(image.bytes);
     return this.ai.run(this.primaryModel, {
       messages: [
         {
@@ -163,7 +165,7 @@ export class CloudflareReceiptParserProvider implements ReceiptParserProvider {
             { type: "text", text: RECEIPT_PARSE_PROMPT },
             {
               type: "image_url",
-              image_url: { url: `data:${image.mimeType};base64,${image.base64}` },
+              image_url: { url: `data:${image.mimeType};base64,${base64}` },
             },
           ],
         },
@@ -179,9 +181,10 @@ export class CloudflareReceiptParserProvider implements ReceiptParserProvider {
   }
 
   private async runFallbackModel(image: ReceiptImage) {
+    const base64 = bytesToBase64(image.bytes);
     return this.ai.run(this.fallbackModel, {
       task: "query",
-      image: `data:${image.mimeType};base64,${image.base64}`,
+      image: `data:${image.mimeType};base64,${base64}`,
       question: RECEIPT_PARSE_PROMPT,
       reasoning: true,
       temperature: 0,

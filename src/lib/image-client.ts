@@ -2,6 +2,8 @@ const MAX_INFERENCE_DIMENSION = 3_200;
 const MIN_RECEIPT_WIDTH = 1_400;
 const ANALYSIS_DIMENSION = 360;
 const JPEG_QUALITY = 0.92;
+const MAX_SERVER_DIMENSION = 2_500;
+const MAX_SERVER_BYTES = 4 * 1024 * 1024;
 
 type ReceiptBounds = { x: number; y: number; width: number; height: number };
 
@@ -214,6 +216,34 @@ export async function prepareReceiptImageVariants(file: File) {
 export async function prepareReceiptImage(file: File) {
   const variants = await prepareReceiptImageVariants(file);
   return variants[0] ?? file;
+}
+
+/** Produces a metadata-free, bounded upload for the private server OCR path. */
+export async function prepareServerReceiptImage(file: File) {
+  if (typeof createImageBitmap !== "function") return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const crop = detectBounds(bitmap);
+    const scale = Math.min(1, MAX_SERVER_DIMENSION / Math.max(crop.width, crop.height));
+    let width = Math.max(1, Math.round(crop.width * scale));
+    let height = Math.max(1, Math.round(crop.height * scale));
+    for (const quality of [0.86, 0.76, 0.66]) {
+      const canvas = renderReceiptCanvas(bitmap, crop, width, height, "grayscale(1) contrast(1.1)");
+      const blob = canvas
+        ? await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality))
+        : null;
+      if (blob && blob.size <= MAX_SERVER_BYTES) {
+        bitmap.close();
+        return new File([blob], `receipt-server-${Date.now()}.jpg`, { type: "image/jpeg" });
+      }
+      width = Math.max(1, Math.round(width * 0.82));
+      height = Math.max(1, Math.round(height * 0.82));
+    }
+    bitmap.close();
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function rotateReceiptImage(file: File) {

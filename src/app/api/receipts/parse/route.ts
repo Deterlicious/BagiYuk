@@ -1,137 +1,307 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { normalizeAiReceipt } from "@/domain/receipt/normalize";
-import { CloudflareReceiptParserProvider, type WorkersAiBinding } from "@/features/receipt-parser/cloudflare-provider";
+import {
+  canonicalCloudRunOrigin,
+  CloudRunReceiptParserProvider,
+} from "@/features/receipt-parser/cloud-run-provider";
+import {
+  CloudflareReceiptParserProvider,
+  type WorkersAiBinding,
+} from "@/features/receipt-parser/cloudflare-provider";
 import { MockReceiptParserProvider } from "@/features/receipt-parser/mock-provider";
 import { ReceiptParserError, type ReceiptParserProvider } from "@/features/receipt-parser/provider";
-import { bytesToBase64, getImageDimensions } from "@/lib/image";
+import {
+  getOrCreateAnonymousDeviceId,
+  hashScanIdentity,
+  reserveScanQuota,
+  SERVER_SCAN_LIMITS,
+  type ScanQuotaDatabase,
+  verifyTurnstileToken,
+} from "@/features/receipt-parser/scan-security";
+import { getImageDimensions } from "@/lib/image";
 
-const MAX_FILE_SIZE = 8 * 1024 * 1024;
-const MAX_DIMENSION = 12_000;
-const MIN_DIMENSION = 80;
+const MAX_FILE_SIZE = 4 * 1024 * 1024;
+const MAX_PIXELS = 20_000_000;
+const MAX_DIMENSION = 8_000;
+const MIN_DIMENSION = 120;
+const DEVICE_COOKIE = "bagiyuk_scan_device";
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-const allowedExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
-const requestBuckets = new Map<string, { count: number; resetAt: number }>();
 
-function errorResponse(message: string, code: string, status: number) {
-  return NextResponse.json({ error: { code, message } }, { status });
+type RuntimeEnv = CloudflareEnv & {
+  AI?: WorkersAiBinding;
+  OCR_QUOTA?: ScanQuotaDatabase;
+  OCR_QUOTA_SECRET?: string;
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_EXPECTED_HOSTNAME?: string;
+  CLOUD_RUN_OCR_URL?: string;
+  GOOGLE_SERVICE_ACCOUNT_EMAIL?: string;
+  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
+  RECEIPT_AI_PROVIDER?: string;
+  RECEIPT_AI_MODEL?: string;
+  RECEIPT_AI_FALLBACK_MODEL?: string;
+};
+
+function errorResponse(message: string, code: string, status: number, headers?: HeadersInit) {
+  return NextResponse.json({ error: { code, message } }, { status, headers });
 }
 
-function isRateLimited(request: Request) {
-  const key = request.headers.get("cf-connecting-ip") ?? "local";
-  const now = Date.now();
-  const bucket = requestBuckets.get(key);
-  if (!bucket || bucket.resetAt <= now) {
-    requestBuckets.set(key, { count: 1, resetAt: now + 60_000 });
-    return false;
-  }
-  bucket.count += 1;
-  return bucket.count > 8;
-}
-
-async function getProvider(): Promise<ReceiptParserProvider> {
-  const providerName = process.env.RECEIPT_AI_PROVIDER ?? "mock";
-  if (providerName !== "cloudflare") return new MockReceiptParserProvider();
-
-  const { env } = await getCloudflareContext({ async: true });
-  const ai = (env as CloudflareEnv & { AI?: WorkersAiBinding }).AI;
-  if (!ai) {
-    throw new ReceiptParserError("not_configured", "Binding Workers AI belum tersedia.");
-  }
-  const model =
-    (env as CloudflareEnv & { RECEIPT_AI_MODEL?: string }).RECEIPT_AI_MODEL ??
-    process.env.RECEIPT_AI_MODEL ??
-    "@cf/google/gemma-4-26b-a4b-it";
-  const fallbackModel =
-    (env as CloudflareEnv & { RECEIPT_AI_FALLBACK_MODEL?: string })
-      .RECEIPT_AI_FALLBACK_MODEL ??
-    process.env.RECEIPT_AI_FALLBACK_MODEL ??
-    "@cf/moondream/moondream3.1-9B-A2B";
-  return new CloudflareReceiptParserProvider(ai, model, fallbackModel);
-}
-
-async function withTimeout<T>(promise: Promise<T>, milliseconds: number) {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+async function readBoundedBody(request: Request, maximumBytes: number) {
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new ReceiptParserError("timeout", "Pemrosesan struk melewati batas waktu.")),
-          milliseconds,
-        );
-      }),
-    ]);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel("body_too_large");
+        throw new Error("body_too_large");
+      }
+      chunks.push(value);
+    }
   } finally {
-    if (timeout) clearTimeout(timeout);
+    reader.releaseLock();
+  }
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function cookieValue(request: Request, name: string) {
+  const source = request.headers.get("cookie") ?? "";
+  for (const part of source.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) {
+      try {
+        return decodeURIComponent(value.join("="));
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+function attachDeviceCookie(response: NextResponse, id: string, created: boolean) {
+  if (!created) return response;
+  response.cookies.set(DEVICE_COOKIE, id, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 365 * 24 * 60 * 60,
+    path: "/",
+  });
+  return response;
+}
+
+async function getRuntimeEnv(): Promise<RuntimeEnv> {
+  if (process.env.NODE_ENV !== "production") {
+    return process.env as unknown as RuntimeEnv;
+  }
+  try {
+    const { env } = await getCloudflareContext({ async: true });
+    return env as RuntimeEnv;
+  } catch {
+    return process.env as unknown as RuntimeEnv;
   }
 }
 
-export async function POST(request: Request) {
-  if (isRateLimited(request)) {
-    return errorResponse(
-      "Terlalu banyak percobaan dalam waktu singkat. Tunggu sebentar atau masukkan manual.",
-      "rate_limited",
-      429,
+function serverOcrConfigured(env: RuntimeEnv) {
+  return (
+    env.RECEIPT_AI_PROVIDER === "cloudrun" &&
+    Boolean(
+      env.OCR_QUOTA &&
+        env.OCR_QUOTA_SECRET &&
+        env.TURNSTILE_SITE_KEY &&
+        env.TURNSTILE_SECRET_KEY &&
+        env.TURNSTILE_EXPECTED_HOSTNAME &&
+        env.CLOUD_RUN_OCR_URL &&
+        canonicalCloudRunOrigin(env.CLOUD_RUN_OCR_URL) &&
+        env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
+        env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    )
+  );
+}
+
+async function getProvider(env: RuntimeEnv): Promise<ReceiptParserProvider> {
+  const providerName = env.RECEIPT_AI_PROVIDER ?? process.env.RECEIPT_AI_PROVIDER ?? "disabled";
+  if (providerName === "cloudrun") {
+    if (
+      !env.CLOUD_RUN_OCR_URL ||
+      !env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+      !env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+    ) {
+      throw new ReceiptParserError("not_configured", "Layanan OCR server belum dikonfigurasi.");
+    }
+    return new CloudRunReceiptParserProvider({
+      url: env.CLOUD_RUN_OCR_URL,
+      serviceAccountEmail: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      serviceAccountPrivateKey: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    });
+  }
+
+  if (providerName === "cloudflare") {
+    if (!env.AI) throw new ReceiptParserError("not_configured", "Binding Workers AI belum tersedia.");
+    return new CloudflareReceiptParserProvider(
+      env.AI,
+      env.RECEIPT_AI_MODEL ?? "@cf/google/gemma-4-26b-a4b-it",
+      env.RECEIPT_AI_FALLBACK_MODEL ?? "@cf/moondream/moondream3.1-9B-A2B",
     );
   }
 
-  let formData: FormData;
+  if (providerName === "mock" && process.env.NODE_ENV !== "production") {
+    return new MockReceiptParserProvider();
+  }
+  throw new ReceiptParserError("not_configured", "OCR server belum diaktifkan.");
+}
+
+export async function GET() {
+  const env = await getRuntimeEnv();
+  return NextResponse.json(
+    {
+      enabled: serverOcrConfigured(env),
+      turnstileSiteKey: serverOcrConfigured(env) ? env.TURNSTILE_SITE_KEY : null,
+      limits: SERVER_SCAN_LIMITS,
+      maxUploadBytes: MAX_FILE_SIZE,
+    },
+    { headers: { "cache-control": "private, no-store" } },
+  );
+}
+
+export async function POST(request: Request) {
+  const device = getOrCreateAnonymousDeviceId(cookieValue(request, DEVICE_COOKIE));
+  const withDevice = (response: NextResponse) => attachDeviceCookie(response, device.id, device.created);
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (!Number.isFinite(contentLength) || contentLength < 0 || contentLength > MAX_FILE_SIZE) {
+    return withDevice(
+      errorResponse("Ukuran foto maksimal 4 MB.", "invalid_size", contentLength > MAX_FILE_SIZE ? 413 : 400),
+    );
+  }
+
+  const mimeType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (!allowedTypes.has(mimeType)) {
+    return withDevice(errorResponse("Gunakan foto JPG, PNG, atau WebP.", "invalid_type", 415));
+  }
+
+  let bytes: Uint8Array;
   try {
-    formData = await request.formData();
+    bytes = await readBoundedBody(request, MAX_FILE_SIZE);
   } catch {
-    return errorResponse("Upload foto tidak dapat dibaca.", "invalid_form", 400);
+    return withDevice(errorResponse("Ukuran foto maksimal 4 MB.", "invalid_size", 413));
   }
-
-  const receipt = formData.get("receipt");
-  if (!(receipt instanceof File)) {
-    return errorResponse("Pilih satu foto struk terlebih dahulu.", "missing_file", 400);
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_FILE_SIZE) {
+    return withDevice(errorResponse("Ukuran foto maksimal 4 MB.", "invalid_size", 413));
   }
-  if (!allowedTypes.has(receipt.type)) {
-    return errorResponse("Gunakan foto JPG, PNG, atau WebP.", "invalid_type", 415);
-  }
-  const extension = receipt.name.split(".").pop()?.toLocaleLowerCase("en-US");
-  if (!extension || !allowedExtensions.has(extension)) {
-    return errorResponse("Ekstensi foto harus JPG, PNG, atau WebP.", "invalid_extension", 415);
-  }
-  if (receipt.size === 0 || receipt.size > MAX_FILE_SIZE) {
-    return errorResponse("Ukuran foto harus antara 1 byte dan 8 MB.", "invalid_size", 413);
-  }
-
-  const bytes = new Uint8Array(await receipt.arrayBuffer());
-  const dimensions = getImageDimensions(bytes, receipt.type);
+  const dimensions = getImageDimensions(bytes, mimeType);
   if (
     !dimensions ||
     dimensions.width < MIN_DIMENSION ||
     dimensions.height < MIN_DIMENSION ||
     dimensions.width > MAX_DIMENSION ||
-    dimensions.height > MAX_DIMENSION
+    dimensions.height > MAX_DIMENSION ||
+    dimensions.width * dimensions.height > MAX_PIXELS
   ) {
-    return errorResponse(
-      "Dimensi foto tidak valid. Gunakan foto utuh berukuran wajar.",
-      "invalid_dimensions",
-      422,
+    return withDevice(
+      errorResponse("Dimensi foto tidak aman atau format gambar tidak sesuai isinya.", "invalid_dimensions", 422),
+    );
+  }
+
+  const env = await getRuntimeEnv();
+  if (!serverOcrConfigured(env)) {
+    return withDevice(
+      errorResponse("Pemindai pintar belum tersedia. Gunakan pemindai lokal.", "not_configured", 503),
+    );
+  }
+
+  const network = request.headers.get("cf-connecting-ip");
+  if (!network && process.env.NODE_ENV === "production") {
+    return withDevice(errorResponse("Identitas jaringan tidak tersedia.", "request_untrusted", 403));
+  }
+
+  const turnstileToken = request.headers.get("x-turnstile-token") ?? "";
+  let challengeValid = false;
+  try {
+    challengeValid = await verifyTurnstileToken({
+      token: turnstileToken,
+      secret: env.TURNSTILE_SECRET_KEY!,
+      remoteIp: network ?? "127.0.0.1",
+      expectedHostname: env.TURNSTILE_EXPECTED_HOSTNAME!,
+      signal: request.signal,
+    });
+  } catch {
+    // A Turnstile outage must fail closed without consuming OCR quota.
+  }
+  if (!challengeValid) {
+    return withDevice(
+      errorResponse("Pemeriksaan keamanan belum berhasil. Coba lagi.", "challenge_failed", 403),
+    );
+  }
+
+  let identity: { deviceHash: string; networkHash: string };
+  try {
+    identity = await hashScanIdentity(device.id, network ?? "local", env.OCR_QUOTA_SECRET!);
+  } catch {
+    return withDevice(errorResponse("Pengaman kuota belum tersedia.", "quota_unavailable", 503));
+  }
+  const quota = await reserveScanQuota(env.OCR_QUOTA!, identity);
+  if (!quota.allowed) {
+    const retrySeconds = Math.max(1, Math.ceil((quota.retryAt - Date.now()) / 1_000));
+    const unavailable = quota.reason === "unavailable";
+    return withDevice(
+      errorResponse(
+        unavailable
+          ? "Pengaman kuota sedang tidak tersedia. Pemindai lokal tetap bisa digunakan."
+          : quota.reason === "burst"
+          ? "Tunggu sebentar sebelum memindai lagi."
+          : "Kuota pemindai pintar sudah habis. Pemindai lokal tetap bisa digunakan.",
+        `quota_${quota.reason}`,
+        unavailable ? 503 : 429,
+        { "retry-after": String(retrySeconds), "x-ratelimit-remaining": "0" },
+      ),
     );
   }
 
   try {
-    const provider = await getProvider();
-    const parsed = await withTimeout(
-      provider.parse({
-        mimeType: receipt.type as "image/jpeg" | "image/png" | "image/webp",
-        base64: bytesToBase64(bytes),
+    const provider = await getProvider(env);
+    const parsed = await provider.parse(
+      {
+        mimeType: mimeType as "image/jpeg" | "image/png" | "image/webp",
+        bytes,
         width: dimensions.width,
         height: dimensions.height,
-      }),
-      75_000,
+      },
+      request.signal,
     );
-    return NextResponse.json({ receipt: normalizeAiReceipt(parsed), provider: provider.name });
+    return withDevice(
+      NextResponse.json(
+        { receipt: normalizeAiReceipt(parsed), provider: provider.name, quotaRemaining: quota.remaining },
+        {
+          headers: {
+            "cache-control": "no-store",
+            "x-ratelimit-limit": String(SERVER_SCAN_LIMITS.deviceDaily),
+            "x-ratelimit-remaining": String(quota.remaining),
+            "x-ratelimit-reset": String(Math.floor(quota.dailyResetAt / 1_000)),
+          },
+        },
+      ),
+    );
   } catch (error) {
     const code = error instanceof ReceiptParserError ? error.code : "provider_unavailable";
-    return errorResponse(
-      "Struk belum berhasil dibaca. Coba lagi atau lanjutkan dengan input manual.",
-      code,
-      code === "not_configured" ? 503 : 502,
+    return withDevice(
+      errorResponse(
+        "Pemindai pintar belum berhasil. Pemindaian lokal masih tersedia.",
+        code,
+        code === "not_configured" ? 503 : code === "timeout" ? 504 : 502,
+        { "cache-control": "no-store", "x-ratelimit-remaining": String(quota.remaining) },
+      ),
     );
   }
 }

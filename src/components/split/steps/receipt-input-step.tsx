@@ -11,11 +11,13 @@ import {
   LoaderCircle,
   RotateCw,
   ScanLine,
+  ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import { editableReceiptSchema } from "@/domain/receipt/schemas";
 import type { EditableReceipt } from "@/domain/receipt/types";
 import { trackProductEvent } from "@/lib/analytics";
@@ -26,15 +28,22 @@ import {
   type ReceiptScanStage,
 } from "@/features/receipt-parser/paddle-client";
 import {
-  receiptScanStages,
+  receiptScanStagesFor,
   scanErrorDetail,
   scanErrorMessage,
   scanStageIndex,
   validateReceiptFile,
+  type ReceiptScanPath,
 } from "@/features/receipt-parser/receipt-scan";
+import {
+  getServerOcrConfig,
+  parseReceiptOnServer,
+  ServerOcrError,
+  type ServerOcrConfig,
+} from "@/features/receipt-parser/server-client";
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
-const SCAN_TIMEOUT_MS = 120_000;
+const SCAN_TIMEOUT_MS = 150_000;
 
 export function ReceiptInputStep({
   onManual,
@@ -55,6 +64,28 @@ export function ReceiptInputStep({
   const [error, setError] = useState("");
   const [errorDetail, setErrorDetail] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [serverConfig, setServerConfig] = useState<ServerOcrConfig | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileAttempt, setTurnstileAttempt] = useState(0);
+  const [serverNotice, setServerNotice] = useState("");
+  const [scanPath, setScanPath] = useState<ReceiptScanPath>("local");
+
+  const handleTurnstileToken = useCallback((token: string | null) => {
+    setTurnstileToken(token);
+  }, []);
+
+  const handleTurnstileUnavailable = useCallback(() => {
+    setTurnstileToken(null);
+    setServerNotice("Pemeriksaan keamanan tidak tersedia; pemindai lokal tetap bisa digunakan.");
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void getServerOcrConfig(controller.signal).then((config) => {
+      if (!controller.signal.aborted) setServerConfig(config);
+    });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -81,6 +112,7 @@ export function ReceiptInputStep({
     if (!selectedFile) return;
     setError("");
     setErrorDetail("");
+    setServerNotice("");
     const validationError = validateReceiptFile(selectedFile, MAX_FILE_SIZE);
     if (validationError) {
       setError(validationError);
@@ -89,6 +121,7 @@ export function ReceiptInputStep({
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(selectedFile);
     setImageSize(null);
+    setScanPath("local");
     setPreviewUrl(URL.createObjectURL(selectedFile));
     void parseReceipt(selectedFile);
   }
@@ -106,6 +139,7 @@ export function ReceiptInputStep({
     setElapsedSeconds(0);
     setError("");
     setErrorDetail("");
+    setServerNotice("");
     setImageSize(null);
     if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
@@ -120,6 +154,7 @@ export function ReceiptInputStep({
     setImageSize(null);
     setError("");
     setErrorDetail("");
+    setServerNotice("");
     void parseReceipt(rotated);
   }
 
@@ -141,7 +176,39 @@ export function ReceiptInputStep({
     });
 
     try {
-      const parsed = await Promise.race([
+      let parsed: EditableReceipt | null = null;
+      const serverToken = serverConfig?.enabled && navigator.onLine ? turnstileToken : null;
+      setScanPath(serverToken ? "server" : "local");
+      if (serverToken) {
+        setStatus("server-reading");
+        try {
+          const result = await Promise.race([
+            parseReceiptOnServer(selectedFile, serverToken, controller.signal),
+            timeoutPromise,
+          ]);
+          parsed = result.receipt;
+          setServerNotice(
+            result.quotaRemaining === null
+              ? "Pemindai pintar selesai."
+              : `Pemindai pintar selesai · ${result.quotaRemaining} scan server tersisa.`,
+          );
+        } catch (serverError) {
+          controller.signal.throwIfAborted();
+          setScanPath("fallback");
+          setStatus("local-fallback");
+          if (serverError instanceof ServerOcrError && serverError.status === 429) {
+            setServerNotice("Kuota pemindai pintar habis; scan dilanjutkan gratis di perangkat ini.");
+          } else {
+            setServerNotice("Pemindai pintar belum berhasil; scan dilanjutkan aman di perangkat ini.");
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 800));
+        } finally {
+          setTurnstileToken(null);
+          setTurnstileAttempt((value) => value + 1);
+        }
+      }
+
+      parsed ??= await Promise.race([
         parseReceiptInBrowser(
           selectedFile,
           (nextStatus) => {
@@ -163,7 +230,7 @@ export function ReceiptInputStep({
       if (controller.signal.reason === "timeout") {
         trackProductEvent("scan_failed");
         void cancelReceiptParsing();
-        setError("Pemindaian melewati 2 menit dan dihentikan. Coba lagi dengan foto lebih kecil atau lanjutkan manual.");
+        setError("Pemindaian melewati batas waktu dan dihentikan. Coba lagi dengan foto lebih kecil atau lanjutkan manual.");
         return;
       }
       setError(scanErrorMessage(scanError, navigator.onLine));
@@ -191,8 +258,9 @@ export function ReceiptInputStep({
   }
 
   const isParsing = status !== "idle";
-  const activeStageIndex = status === "idle" ? -1 : scanStageIndex(status);
-  const activeStage = activeStageIndex >= 0 ? receiptScanStages[activeStageIndex] : null;
+  const activeScanStages = receiptScanStagesFor(scanPath);
+  const activeStageIndex = status === "idle" ? -1 : scanStageIndex(status, activeScanStages);
+  const activeStage = activeStageIndex >= 0 ? activeScanStages[activeStageIndex] : null;
 
   return (
     <section className="mx-auto max-w-[820px]">
@@ -202,7 +270,7 @@ export function ReceiptInputStep({
           Mulai dari foto atau isi sendiri.
         </h1>
         <p className="mt-3 text-base leading-7 text-muted">
-          OCR berjalan langsung di perangkat untuk membantu mengetik ulang. Kamu tetap memeriksa semua angka sebelum dibagikan.
+          Pemindai pintar mencoba membaca struk lebih teliti, lalu otomatis beralih ke OCR perangkat jika layanan atau kuota tidak tersedia. Kamu tetap memeriksa semua angka.
         </p>
       </div>
 
@@ -274,18 +342,18 @@ export function ReceiptInputStep({
                     role="progressbar"
                     aria-label="Tahap pemindaian struk"
                     aria-valuemin={1}
-                    aria-valuemax={receiptScanStages.length}
+                    aria-valuemax={activeScanStages.length}
                     aria-valuenow={activeStageIndex + 1}
-                    aria-valuetext={`${activeStage?.label ?? "Memindai"}, tahap ${activeStageIndex + 1} dari ${receiptScanStages.length}`}
+                    aria-valuetext={`${activeStage?.label ?? "Memindai"}, tahap ${activeStageIndex + 1} dari ${activeScanStages.length}`}
                   >
                     <span
                       className="block h-full rounded-full bg-brand transition-[width] duration-500"
-                      style={{ width: `${((activeStageIndex + 1) / receiptScanStages.length) * 100}%` }}
+                      style={{ width: `${((activeStageIndex + 1) / activeScanStages.length) * 100}%` }}
                     />
                   </div>
 
                   <ol className="grid gap-2 px-4 py-4 sm:grid-cols-2 sm:px-5">
-                    {receiptScanStages.map((scanStage, index) => {
+                    {activeScanStages.map((scanStage, index) => {
                       const isComplete = index < activeStageIndex;
                       const isActive = index === activeStageIndex;
                       return (
@@ -310,7 +378,9 @@ export function ReceiptInputStep({
 
                   {elapsedSeconds >= 8 && (
                     <p className="border-t border-brand/15 px-4 py-3 text-xs leading-5 text-muted sm:px-5">
-                      Aplikasi masih bekerja. Scan pertama lebih lama karena mesin OCR diunduh sekali; scan berikutnya biasanya lebih cepat.
+                      {scanPath === "server"
+                        ? "Pemindai aman sedang menyala dari kondisi hemat daya. Proses pertama biasanya lebih lama."
+                        : "Pemindai lokal mungkin sedang diunduh untuk pertama kali; scan berikutnya biasanya lebih cepat."}
                     </p>
                   )}
 
@@ -423,12 +493,38 @@ export function ReceiptInputStep({
             </div>
           </div>
         )}
+
+        {serverConfig?.enabled && serverConfig.turnstileSiteKey && !isParsing && (
+          <div className="mt-4 rounded-xl border border-brand/20 bg-brand/5 p-3">
+            <div className="flex items-start gap-2 text-xs leading-5 text-muted">
+              <ShieldCheck className="mt-0.5 shrink-0 text-brand" aria-hidden="true" size={16} />
+              <p>
+                <strong className="text-ink">Pemindai pintar dilindungi:</strong>{" "}
+                maksimal {serverConfig.limits.deviceDaily} scan per hari dan {serverConfig.limits.deviceMonthly} per bulan per perangkat. OCR lokal dan input manual tidak dibatasi.
+              </p>
+            </div>
+            <div className="mt-2 overflow-hidden">
+              <TurnstileWidget
+                key={turnstileAttempt}
+                siteKey={serverConfig.turnstileSiteKey}
+                onToken={handleTurnstileToken}
+                onUnavailable={handleTurnstileUnavailable}
+              />
+            </div>
+          </div>
+        )}
+
+        {serverNotice && !error && (
+          <p className="mt-3 text-xs leading-5 font-bold text-brand-strong" role="status">
+            {serverNotice}
+          </p>
+        )}
       </div>
 
       <aside className="mt-5 flex gap-3 rounded-2xl border border-line bg-[#f1ecdf] p-4 text-sm leading-6 text-muted">
         <Info className="mt-0.5 shrink-0 text-brand" aria-hidden="true" size={19} />
         <p>
-          <strong className="text-ink">Supaya mudah dibaca:</strong> ratakan struk, cari cahaya terang, dan pastikan total tidak terpotong. Pemindaian pertama mengunduh model OCR sekitar 31 MB.
+          <strong className="text-ink">Supaya mudah dibaca:</strong> ratakan struk, cari cahaya terang, dan pastikan total tidak terpotong. Foto untuk pemindai pintar dikompresi hingga maksimal 4 MB, diproses sementara, lalu langsung dibuang.
         </p>
       </aside>
     </section>

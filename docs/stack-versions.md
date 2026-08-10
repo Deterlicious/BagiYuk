@@ -1,6 +1,6 @@
 # Stack versions
 
-Verified against the npm registry on 7 August 2026. All selected releases are stable; no beta, canary, or release-candidate packages are used.
+Verified against the npm/Python package metadata on 11 August 2026. All selected releases are stable; no beta, canary, or release-candidate packages are used.
 
 | Package | Version | Rationale |
 | --- | ---: | --- |
@@ -15,6 +15,12 @@ Verified against the npm registry on 7 August 2026. All selected releases are st
 | Plus Jakarta Sans (Fontsource variable) | 5.3.0 | Stable self-hosted font source, bundled through `next/font/local`. |
 | PaddleOCR.js | 0.4.2 | Stable Apache-2.0 browser runtime for local PP-OCRv6 inference. |
 | ONNX Runtime Web (transitive) | 1.27.0 | WASM inference runtime resolved by PaddleOCR.js; its matching binary version is pinned at runtime. |
+| Python | 3.11 | Cloud Run container baseline supported by the pinned Paddle CPU runtime. |
+| PaddleOCR | 3.7.0 | Stable pretrained PP-OCRv6 Python pipeline for private server inference. |
+| PaddlePaddle CPU | 3.2.2 | Compatibility pin; 3.3.1 fails the verified CPU path with an upstream oneDNN new-IR error. |
+| PaddleX | 3.7.2 | Pinned pipeline runtime used by PaddleOCR 3.7. |
+| NumPy / Pillow | 2.2.6 / 11.3.0 | Pinned in-memory image boundary for the OCR container. |
+| FastAPI / Uvicorn | 0.116.1 / 0.35.0 | Minimal single-worker private OCR HTTP boundary. |
 | Zod | 4.4.3 | Current stable validation boundary. |
 | OpenNext Cloudflare | 1.20.2 | Supports Next.js `>=16.2.11`; paired with 16.3.0. |
 | Wrangler | 4.119.0 | Current stable Cloudflare CLI. |
