@@ -8,7 +8,7 @@ The core workflow remains fully usable without server OCR: **Struk â†’ Periksa â
 
 - Camera/gallery receipt input with automatic scanning, staged progress, in-memory preview, cancel/retry, and manual fallback.
 - Private CPU PP-OCRv6 service on Cloud Run plus on-device PaddleOCR.js/WebAssembly fallback.
-- Turnstile, private Google IAM, D1 quotas, anonymous keyed identifiers, strict image limits, and a global monthly dispatch cap.
+- Turnstile, service-account-key-free Google Workload Identity Federation, private Cloud Run IAM, D1 quotas, anonymous keyed identifiers, strict image limits, and a global monthly dispatch cap.
 - Zod-validated structured OCR output and visible low-confidence review states.
 - Editable item names, quantity, unit price, line total, subtotal, tax, service, discount, rounding, and receipt total.
 - Fast participant entry, deterministic avatars, and accessible multi-owner item assignment.
@@ -57,7 +57,7 @@ pnpm cf-typegen   # regenerate Cloudflare binding types
 - `src/domain/billing` is the sole calculation authority. Money is a safe integer and all remainders have stable participant-order tie breaking.
 - `src/features/splitter` owns the local reducer-compatible draft shape and persistence schema.
 - `src/features/receipt-parser` prefers protected server OCR when configured, then falls back to PaddleOCR.js after user action. Both paths feed the same deterministic, editable receipt parser.
-- `services/receipt-ocr` is a private FastAPI/PP-OCRv6 CPU container. It returns only text/confidence/polygons and never calculates a split.
+- `services/receipt-ocr` is a private FastAPI/PP-OCRv6 CPU container. Cloudflare reaches it through short-lived federated Google identity tokens; it returns only text/confidence/polygons and never calculates a split.
 - The Next.js App Router handles the homepage, wizard, manifest, and server parse route. OpenNext packages it for Cloudflare Workers.
 - Base UI powers the accessible reset alert dialog; shadcn's `base-nova` configuration and local UI components keep the design system small.
 

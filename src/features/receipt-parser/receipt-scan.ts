@@ -10,7 +10,7 @@ export const receiptScanStages: Array<{
 }> = [
   { id: "preparing", label: "Menyiapkan foto", detail: "Memotong dan memperjelas struk" },
   { id: "server-reading", label: "Membaca lebih teliti", detail: "Pemindai pintar memeriksa teks dan posisi" },
-  { id: "local-fallback", label: "Beralih ke perangkat", detail: "Pemindai lokal mengambil alih tanpa memakai kuota" },
+  { id: "local-fallback", label: "Beralih ke perangkat", detail: "Pemindai lokal mengecek ulang atau mengambil alih tanpa kuota tambahan" },
   { id: "loading-model", label: "Menyalakan pemindai", detail: "Unduhan pertama bisa memerlukan waktu" },
   { id: "reading", label: "Membaca tulisan", detail: "Mendeteksi item, jumlah, dan harga" },
   { id: "enhancing", label: "Memperjelas hasil", detail: "Mencoba ulang bagian yang belum cocok" },

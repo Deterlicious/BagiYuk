@@ -28,6 +28,10 @@ import {
   type ReceiptScanStage,
 } from "@/features/receipt-parser/paddle-client";
 import {
+  selectBestReceiptCandidate,
+  shouldCrossCheckServerReceipt,
+} from "@/features/receipt-parser/paddle-receipt-parser";
+import {
   receiptScanStagesFor,
   scanErrorDetail,
   scanErrorMessage,
@@ -177,6 +181,8 @@ export function ReceiptInputStep({
 
     try {
       let parsed: EditableReceipt | null = null;
+      let serverCandidate: EditableReceipt | null = null;
+      let serverQuotaRemaining: number | null = null;
       const serverToken = serverConfig?.enabled && navigator.onLine ? turnstileToken : null;
       setScanPath(serverToken ? "server" : "local");
       if (serverToken) {
@@ -186,12 +192,23 @@ export function ReceiptInputStep({
             parseReceiptOnServer(selectedFile, serverToken, controller.signal),
             timeoutPromise,
           ]);
-          parsed = result.receipt;
-          setServerNotice(
-            result.quotaRemaining === null
-              ? "Pemindai pintar selesai."
-              : `Pemindai pintar selesai · ${result.quotaRemaining} scan server tersisa.`,
-          );
+          serverCandidate = result.receipt;
+          serverQuotaRemaining = result.quotaRemaining;
+          if (shouldCrossCheckServerReceipt(serverCandidate)) {
+            setScanPath("fallback");
+            setStatus("local-fallback");
+            setServerNotice(
+              "Hasil server belum konsisten; sedang dibandingkan gratis dengan pemindai perangkat.",
+            );
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+          } else {
+            parsed = serverCandidate;
+            setServerNotice(
+              result.quotaRemaining === null
+                ? "Pemindai pintar selesai."
+                : `Pemindai pintar selesai · ${result.quotaRemaining} scan server tersisa.`,
+            );
+          }
         } catch (serverError) {
           controller.signal.throwIfAborted();
           setScanPath("fallback");
@@ -208,16 +225,56 @@ export function ReceiptInputStep({
         }
       }
 
-      parsed ??= await Promise.race([
-        parseReceiptInBrowser(
-          selectedFile,
-          (nextStatus) => {
-            if (!controller.signal.aborted) setStatus(nextStatus);
-          },
-          controller.signal,
-        ),
-        timeoutPromise,
-      ]);
+      if (!parsed) {
+        let crossCheckTimeout = 0;
+        try {
+          const localPromise = parseReceiptInBrowser(
+            selectedFile,
+            (nextStatus) => {
+              if (controller.signal.aborted) return;
+              if (serverToken && nextStatus === "preparing") return;
+              setStatus(nextStatus);
+            },
+            controller.signal,
+          );
+          const localCandidate = await Promise.race([
+            localPromise,
+            timeoutPromise,
+            ...(serverCandidate
+              ? [
+                  new Promise<never>((_, reject) => {
+                    crossCheckTimeout = window.setTimeout(
+                      () => reject(new Error("local_cross_check_timeout")),
+                      60_000,
+                    );
+                  }),
+                ]
+              : []),
+          ]);
+          parsed = serverCandidate
+            ? selectBestReceiptCandidate([serverCandidate, localCandidate])
+            : localCandidate;
+          if (serverCandidate) {
+            const quotaSuffix = serverQuotaRemaining === null
+              ? "."
+              : ` · ${serverQuotaRemaining} scan server tersisa.`;
+            setServerNotice(
+              parsed === localCandidate
+                ? `Hasil perangkat dipilih karena lebih konsisten dengan angka struk${quotaSuffix}`
+                : `Hasil server dipertahankan setelah pemeriksaan silang di perangkat${quotaSuffix}`,
+            );
+          }
+        } catch (localError) {
+          if (!serverCandidate || controller.signal.aborted) throw localError;
+          parsed = serverCandidate;
+          setServerNotice(
+            "Pemeriksaan silang lokal belum selesai; hasil server tetap dibuka dan wajib diperiksa.",
+          );
+          void cancelReceiptParsing();
+        } finally {
+          window.clearTimeout(crossCheckTimeout);
+        }
+      }
       const receipt = editableReceiptSchema.parse(parsed);
       controller.signal.throwIfAborted();
       scanControllerRef.current = null;

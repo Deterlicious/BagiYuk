@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { CloudRunReceiptParserProvider } from "@/features/receipt-parser/cloud-run-provider";
+import {
+  CloudRunReceiptParserProvider,
+  getCloudRunIdentityToken,
+} from "@/features/receipt-parser/cloud-run-provider";
 import {
   getOrCreateAnonymousDeviceId,
   hashScanIdentity,
@@ -38,6 +41,30 @@ function quotaDatabase(options?: { insertError?: Error; insertChanges?: number; 
     },
   };
   return database;
+}
+
+async function createTestPrivateKey() {
+  const pair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2_048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", pair.privateKey);
+  const base64 = Buffer.from(pkcs8).toString("base64").match(/.{1,64}/g)?.join("\n");
+  return {
+    privatePem: `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----`,
+    publicKey: pair.publicKey,
+  };
+}
+
+function syntheticIdentityToken(payload: Record<string, unknown>) {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(payload)}.test-signature`;
 }
 
 describe("protected server OCR", () => {
@@ -155,6 +182,114 @@ describe("protected server OCR", () => {
     expect(result).toMatchObject({ allowed: false, reason: "device_daily" });
   });
 
+  it("exchanges a short-lived WIF assertion for a private Cloud Run identity token", async () => {
+    const { privatePem, publicKey } = await createTestPrivateKey();
+    const cloudRunUrl = "https://private-ocr.example.run.app";
+    const serviceAccountEmail = "invoker@example.iam.gserviceaccount.com";
+    const expiresAt = Math.floor(Date.now() / 1_000) + 3_600;
+    const identityToken = syntheticIdentityToken({
+      aud: cloudRunUrl,
+      email: serviceAccountEmail,
+      email_verified: true,
+      exp: expiresAt,
+      iss: "https://accounts.google.com",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "federated-access-token-long-enough",
+            expires_in: 3_600,
+            token_type: "Bearer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: identityToken }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const wifAudience =
+        "//iam.googleapis.com/projects/513268340263/locations/global/workloadIdentityPools/bagiyuk-cloudflare/providers/bagiyuk-worker";
+      const token = await getCloudRunIdentityToken({
+        url: cloudRunUrl,
+        serviceAccountEmail,
+        wifAudience,
+        wifIssuer: "https://bagiyuk.example.workers.dev/wif",
+        wifSubject: "bagiyuk-cloudflare-worker",
+        wifPrivateKey: privatePem,
+        wifKeyId: "bagiyuk-wif-test",
+      });
+
+      expect(token).toBe(identityToken);
+      const stsRequest = fetchMock.mock.calls[0];
+      if (!stsRequest) throw new Error("Missing STS request");
+      expect(stsRequest[0]).toBe("https://sts.googleapis.com/v1/token");
+      expect(stsRequest[1]?.headers).not.toHaveProperty("authorization");
+      const stsBody = JSON.parse(String(stsRequest[1]?.body)) as Record<string, string>;
+      expect(stsBody.audience).toBe(wifAudience);
+      const assertion = stsBody.subjectToken ?? "";
+      const [encodedHeader = "", encodedPayload = "", encodedSignature = ""] =
+        assertion.split(".");
+      expect(JSON.parse(Buffer.from(encodedHeader, "base64url").toString("utf8"))).toMatchObject({
+        alg: "RS256",
+        kid: "bagiyuk-wif-test",
+      });
+      const assertionClaims = JSON.parse(
+        Buffer.from(encodedPayload, "base64url").toString("utf8"),
+      ) as Record<string, unknown>;
+      expect(assertionClaims).toMatchObject({
+        iss: "https://bagiyuk.example.workers.dev/wif",
+        sub: "bagiyuk-cloudflare-worker",
+        aud: `https:${wifAudience}`,
+        environment: "production",
+        workload: "receipt-ocr",
+      });
+      expect(Number(assertionClaims.exp) - Number(assertionClaims.iat)).toBe(305);
+      expect(assertionClaims.jti).toEqual(expect.any(String));
+      await expect(
+        crypto.subtle.verify(
+          "RSASSA-PKCS1-v1_5",
+          publicKey,
+          Buffer.from(encodedSignature, "base64url"),
+          new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+        ),
+      ).resolves.toBe(true);
+      const identityRequest = fetchMock.mock.calls[1];
+      if (!identityRequest) throw new Error("Missing IAM Credentials request");
+      expect(identityRequest[0]).toContain(
+        "invoker%40example.iam.gserviceaccount.com:generateIdToken",
+      );
+      expect(identityRequest[1]).toEqual(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            authorization: "Bearer federated-access-token-long-enough",
+          }),
+          body: JSON.stringify({ audience: cloudRunUrl, includeEmail: true }),
+        }),
+      );
+      await expect(
+        getCloudRunIdentityToken({
+          url: cloudRunUrl,
+          serviceAccountEmail,
+          wifAudience,
+          wifIssuer: "https://bagiyuk.example.workers.dev/wif",
+          wifSubject: "bagiyuk-cloudflare-worker",
+          wifPrivateKey: privatePem,
+          wifKeyId: "bagiyuk-wif-test",
+        }),
+      ).resolves.toBe(identityToken);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("validates server OCR lines and sends a private identity token", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -175,7 +310,12 @@ describe("protected server OCR", () => {
       {
         url: "https://private-ocr.example.run.app",
         serviceAccountEmail: "invoker@example.iam.gserviceaccount.com",
-        serviceAccountPrivateKey: "unused-in-test",
+        wifAudience:
+          "//iam.googleapis.com/projects/513268340263/locations/global/workloadIdentityPools/bagiyuk-cloudflare/providers/bagiyuk-worker",
+        wifIssuer: "https://bagiyuk.example.workers.dev/wif",
+        wifSubject: "bagiyuk-cloudflare-worker",
+        wifPrivateKey: "-----BEGIN PRIVATE KEY-----\nunused-in-test\n-----END PRIVATE KEY-----",
+        wifKeyId: "bagiyuk-wif-test",
       },
       async () => "private-id-token",
     );

@@ -1,6 +1,6 @@
 # BagiYuk MVP Implementation Plan
 
-Status: implementation and local verification complete; production Cloud Run activation awaits a billing-enabled Google Cloud project
+Status: implemented, verified, and active in production with protected Cloud Run OCR
 Last updated: 11 August 2026
 
 ## Protected Cloud Run receipt intelligence
@@ -8,7 +8,7 @@ Last updated: 11 August 2026
 - Keep the complete browser OCR and manual flows as credential-free fallbacks, but prefer the official pretrained PP-OCRv6 small server pipeline when configured; evaluate the medium weights only after measuring memory and p95 latency.
 - Do not deploy full PP-StructureV3 on the free tier: its official lightweight CPU benchmark peaks near 13 GiB RAM and would undermine the billing guardrail. Use its trained general OCR pipeline with document and text-line orientation plus BagiYuk's deterministic layout parser instead.
 - Add a small Python/FastAPI container that validates images in memory, corrects orientation, runs the pretrained CPU pipeline, returns only untrusted text/confidence/polygon JSON, and never writes receipt images to disk or logs their contents.
-- Place the service behind the existing Cloudflare Worker API and private Google IAM. The Worker mints a short-lived service-account ID token so clients cannot bypass Cloudflare quotas by calling the container URL directly.
+- Place the service behind the existing Cloudflare Worker API and private Google IAM. The Worker uses a subject-restricted Workload Identity Federation exchange to mint a short-lived service-account ID token, so clients cannot bypass Cloudflare quotas by calling the container URL directly. Do not create or store a Google service-account key.
 - Replace isolate-local rate limiting with persistent D1 reservations: three server scans per anonymous device per day and twenty per month; ten per network per day and fifty per month; eight hundred accepted server attempts globally per month; plus a short burst ceiling. Hash network identifiers with a server secret and store only opaque counters.
 - Require a single-use Cloudflare Turnstile token for every remote scan and validate its hostname/action at the Worker before reserving quota.
 - Validate the request before spending quota: accepted image signatures only, at most 4 MiB, sane dimensions, at most 20 megapixels, one image per request, and bounded upstream/body timeouts.
@@ -22,8 +22,9 @@ Verification completed on 11 August 2026:
 - The Linux image build verifies pinned model checksums and runs real PP-OCRv6 inference with PaddleOCR 3.7.0, PaddleX 3.7.2, and PaddlePaddle 3.2.2; the incompatible 3.3.1 runtime was rejected after a real oneDNN inference failure.
 - The final image is about 583 MB uncompressed, runs as `appuser`, starts with a read-only root filesystem, and uses an ephemeral `/tmp` cache.
 - Four supplied real receipts produced 26, 122, 29, and 68 OCR lines in 2.56–12.54 seconds on the 1-vCPU profile. Ten consecutive scans averaged 1.9 seconds with memory stable near 800 MiB, below the 2-GiB limit.
-- D1 migrations and the Turnstile widget are provisioned in Cloudflare production. The provider remains intentionally `disabled` until private Cloud Run IAM, URL, invoker identity, and Google secret are available.
-- TypeScript, ESLint, 51 Vitest checks, dependency-free Python boundary checks, container smoke inference, and 12 Playwright mobile/desktop scenarios pass. The remaining external blocker is that the authenticated Google account has no billing-enabled project or billing account.
+- D1 migrations, Turnstile, the private Cloud Run service, and subject-restricted Workload Identity Federation are provisioned in production. Cloud Run uses 1 vCPU/2 GiB, concurrency one, minimum zero, maximum one, a dedicated role-free runtime identity, and service-level invoker IAM only.
+- The production Worker reports server OCR enabled. A live protected request reached Cloud Run revision `bagiyuk-receipt-ocr-00001-cks`, returned HTTP 200 in 17.4 seconds including cold start, and parsed the supplied Meatsmith receipt into all seven item rows with exact subtotal, tax, and total reconciliation. Direct unauthenticated access remained unavailable.
+- TypeScript, ESLint, 59 Vitest checks, three dependency-free Python boundary checks, container smoke inference, and 12 Playwright mobile/desktop scenarios pass. A project-scoped monthly Rp25,000 budget now alerts at 50%, 80%, and 100%; D1's 800-dispatch global ceiling and Cloud Run's one-instance maximum remain the active cost controls.
 
 ## Advanced local receipt intelligence
 
@@ -86,7 +87,7 @@ Hotfix verification completed on 7 August 2026:
 
 - The supplied Meatsmith image produced all seven items and reconciled exactly to subtotal Rp2,845,000, tax Rp312,950, and total Rp3,157,950.
 - The supplied CW Coffee image produced its single Rp7,272 item, inferred the misaligned PB1 value as Rp727, kept Rp1 rounding editable, and reconciled exactly to Rp8,000.
-- The long Pagi Sore image reached verification with 45 editable items and reconciled exactly to subtotal Rp7,476,000 and total Rp8,223,600; low-confidence tail fields remain visibly marked for mandatory review.
+- The long Pagi Sore image reached verification with all 45 monetary rows and reconciled exactly to subtotal Rp7,476,000 and total Rp8,223,600. OCR recognized 44 item names; the missing final label remains an explicit low-confidence placeholder, while the repaired tail prices are visibly marked for mandatory review.
 - The Cloudflare `workerd` preview returned HTTP 200 without COOP/COEP, confirming that generated PaddleOCR worker assets are no longer isolated from the page.
 - Scan failures now include an optional, URL-sanitized technical detail disclosure for support without overwhelming the primary recovery actions.
 - The deployed Worker was reloaded with a fresh asset build and the real Meatsmith image completed successfully on the production URL with seven items and exact reconciliation.
@@ -169,7 +170,7 @@ Build a production-ready, mobile-first BagiYuk MVP that supports receipt image p
 - Persist only normalized draft JSON in local storage; keep selected image data in memory and discard it on reload/reset.
 - Make the pure domain calculator the only source of split totals. The UI and AI layer provide inputs but never calculate money independently.
 - Treat the entered receipt total as a reconciliation reference. Allocations use the sum of verified items plus explicit charges, preserving any mismatch for correction.
-- Keep mock output development/test-only. Production fails closed with the provider disabled until the protected Cloud Run dependencies are configured; browser OCR and manual entry remain credential-free.
+- Keep mock output development/test-only. Production fails closed unless every protected Cloud Run, WIF, Turnstile, and D1 dependency is configured; browser OCR and manual entry remain credential-free.
 
 ## Definition of done
 
@@ -187,7 +188,7 @@ Completed on 6 August 2026:
 - Six Playwright checks pass: the full journey on 390×844 and desktop, 200% text-size reflow, and the sample-to-fresh-start regression on both viewports.
 - Next.js production build completes with a self-hosted Plus Jakarta Sans variable font.
 - OpenNext builds the Worker bundle and `pnpm preview` starts Wrangler `workerd`; homepage, manifest, and fresh split route return HTTP 200.
-- Browser OCR was verified against two supplied real receipts: the simple receipt produced 2/2 exact item rows and a reconciled Rp694.500 total; the long receipt produced 45/45 item rows whose sum exactly matches the Rp7.476.000 printed subtotal and Rp8.223.600 total.
+- Browser OCR was verified against two supplied real receipts: the simple receipt produced 2/2 exact item rows and a reconciled Rp694.500 total; the long receipt preserved all 45 monetary rows, recognized 44 names, exposed one missing name as a low-confidence editable placeholder, and matched the Rp7.476.000 printed subtotal and Rp8.223.600 total exactly.
 - Homepage and verification screens were visually inspected from the generated mobile and desktop captures.
 
 Production scan UX follow-up completed on 7 August 2026:

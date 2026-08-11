@@ -554,7 +554,7 @@ function extractColumnItems(lines: OcrLine[]) {
     return match.amount;
   });
 
-  if (matchedAmounts.some((amount) => amount === null)) return [];
+  if (matchedAmounts.every((amount) => amount === null)) return [];
 
   return labels.map(({ line, parsed }, index) => {
     const nextCenterY = labels[index + 1]?.line.centerY ?? summaryStart;
@@ -574,19 +574,19 @@ function extractColumnItems(lines: OcrLine[]) {
         !/^(?:nominal\s+belanja|pembulatan|pb\s*[1il|!])\b/i.test(text)
       );
     });
-    const amount = matchedAmounts[index]!;
+    const amount = matchedAmounts[index];
     const score = clampConfidence(
-      [line.score, amount.line.score, ...continuation.map((part) => part.score)].reduce(
+      [line.score, ...(amount ? [amount.line.score] : []), ...continuation.map((part) => part.score)].reduce(
         (sum, value) => sum + value,
         0,
       ) /
-        (2 + continuation.length),
+        (1 + (amount ? 1 : 0) + continuation.length),
     );
     return {
       quantity: parsed.quantity,
       name: [parsed.name, ...continuation.map((part) => part.text.trim())].join(" "),
-      lineTotal: amount.amount,
-      score,
+      lineTotal: amount?.amount ?? 0,
+      score: amount ? score : Math.min(score, 0.3),
     };
   });
 }
@@ -606,6 +606,122 @@ function findMerchant(rows: OcrRow[], firstItemIndex: number) {
       );
     }) ?? null
   );
+}
+
+function divisibilityViolations(
+  items: EditableReceipt["items"],
+  totals: number[],
+  startIndex: number,
+) {
+  return items.slice(startIndex).reduce((count, item, offset) => {
+    const total = totals[startIndex + offset] ?? 0;
+    return count + (item.quantity > 1 && total > 0 && total % item.quantity !== 0 ? 1 : 0);
+  }, 0);
+}
+
+function normalizedUnitPriceDispersion(
+  items: EditableReceipt["items"],
+  totals: number[],
+  startIndex: number,
+) {
+  const unitPrices = items
+    .slice(startIndex)
+    .map((item, offset) => (totals[startIndex + offset] ?? 0) / item.quantity)
+    .filter((value) => value > 0)
+    .sort((a, b) => a - b);
+  const median = unitPrices[Math.floor(unitPrices.length / 2)] ?? 0;
+  if (median <= 0) return Number.POSITIVE_INFINITY;
+  return unitPrices.reduce((sum, value) => sum + Math.abs(value - median) / median, 0);
+}
+
+/**
+ * Repairs a characteristic long-receipt failure where the price column drifts by
+ * one row near the bottom. The printed subtotal supplies the one unassigned
+ * amount, while quantity divisibility must make the shifted alignment strictly
+ * more plausible. Ambiguous gaps keep the normal editable placeholder behavior.
+ */
+function repairShiftedTailAmounts(
+  items: EditableReceipt["items"],
+  statedSubtotal: number,
+) {
+  if (items.length < 5 || statedSubtotal <= 0) return false;
+  const calculatedSubtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const missingAmount = statedSubtotal - calculatedSubtotal;
+  if (missingAmount <= 0 || missingAmount > statedSubtotal * 0.2) return false;
+
+  const zeroIndexes = items.flatMap((item, index) => (item.lineTotal === 0 ? [index] : []));
+  if (zeroIndexes.length > 1) return false;
+  const lastIndex = items.length - 1;
+  const hasTrailingUnpricedLabel = zeroIndexes[0] === lastIndex;
+  if (zeroIndexes.length === 1 && !hasTrailingUnpricedLabel) return false;
+
+  const originalTotals = items.map((item) => item.lineTotal);
+  const baselineTotals = originalTotals.slice();
+  if (hasTrailingUnpricedLabel) baselineTotals[lastIndex] = missingAmount;
+  const earliestStart = Math.max(0, lastIndex - 11);
+  let best:
+    | { startIndex: number; totals: number[]; improvement: number; displacedAmount: number }
+    | undefined;
+
+  for (let startIndex = earliestStart; startIndex <= lastIndex - 3; startIndex += 1) {
+    const firstItem = items[startIndex]!;
+    const currentAmount = originalTotals[startIndex] ?? 0;
+    if (
+      firstItem.quantity <= 1 ||
+      currentAmount <= 0 ||
+      currentAmount % firstItem.quantity === 0 ||
+      missingAmount % firstItem.quantity !== 0
+    ) {
+      continue;
+    }
+
+    const shiftedTotals = baselineTotals.slice();
+    shiftedTotals[startIndex] = missingAmount;
+    for (let index = startIndex + 1; index <= lastIndex; index += 1) {
+      shiftedTotals[index] = originalTotals[index - 1] ?? 0;
+    }
+    const improvement =
+      divisibilityViolations(items, baselineTotals, startIndex) -
+      divisibilityViolations(items, shiftedTotals, startIndex);
+    const baselineDispersion = normalizedUnitPriceDispersion(items, baselineTotals, startIndex);
+    const shiftedDispersion = normalizedUnitPriceDispersion(items, shiftedTotals, startIndex);
+    if (improvement < 1 || shiftedDispersion > baselineDispersion * 0.75) continue;
+    if (!best || improvement > best.improvement || (improvement === best.improvement && startIndex < best.startIndex)) {
+      best = {
+        startIndex,
+        totals: shiftedTotals,
+        improvement,
+        displacedAmount: originalTotals[lastIndex] ?? 0,
+      };
+    }
+  }
+
+  if (!best) return false;
+  for (let index = best.startIndex; index <= lastIndex; index += 1) {
+    const item = items[index]!;
+    const lineTotal = best.totals[index] ?? 0;
+    item.lineTotal = lineTotal;
+    item.unitPrice = lineTotal % item.quantity === 0 ? lineTotal / item.quantity : lineTotal;
+    item.confidence.unitPrice = Math.min(item.confidence.unitPrice, 0.32);
+    item.confidence.lineTotal = Math.min(item.confidence.lineTotal, 0.32);
+  }
+
+  if (!hasTrailingUnpricedLabel && best.displacedAmount > 0) {
+    items.push({
+      id: `ocr-item-${items.length + 1}`,
+      name: "Item belum terbaca",
+      quantity: 1,
+      unitPrice: best.displacedAmount,
+      lineTotal: best.displacedAmount,
+      confidence: {
+        name: 0.12,
+        quantity: 0.2,
+        unitPrice: 0.18,
+        lineTotal: 0.18,
+      },
+    });
+  }
+  return true;
 }
 
 export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
@@ -709,7 +825,49 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
     throw new Error("ocr_no_items");
   }
 
+  repairShiftedTailAmounts(items, charges.statedSubtotal);
   let calculatedSubtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  if (charges.statedSubtotal > calculatedSubtotal) {
+    const missingAmounts = items.filter((item) => item.lineTotal === 0);
+    const missingAmount = charges.statedSubtotal - calculatedSubtotal;
+    if (
+      missingAmounts.length === 1 &&
+      missingAmount > 0 &&
+      missingAmount <= charges.statedSubtotal * 0.5
+    ) {
+      const item = missingAmounts[0]!;
+      item.lineTotal = missingAmount;
+      item.unitPrice =
+        missingAmount % item.quantity === 0 ? missingAmount / item.quantity : missingAmount;
+      item.confidence.unitPrice = Math.min(item.confidence.unitPrice, 0.28);
+      item.confidence.lineTotal = Math.min(item.confidence.lineTotal, 0.28);
+      calculatedSubtotal += missingAmount;
+    } else if (
+      missingAmounts.length === 0 &&
+      missingAmount > 0 &&
+      missingAmount <= charges.statedSubtotal * 0.2
+    ) {
+      for (const item of items.slice(-10)) {
+        item.confidence.name = Math.min(item.confidence.name, 0.42);
+        item.confidence.unitPrice = Math.min(item.confidence.unitPrice, 0.36);
+        item.confidence.lineTotal = Math.min(item.confidence.lineTotal, 0.36);
+      }
+      items.push({
+        id: `ocr-item-${items.length + 1}`,
+        name: "Item belum terbaca",
+        quantity: 1,
+        unitPrice: missingAmount,
+        lineTotal: missingAmount,
+        confidence: {
+          name: 0.12,
+          quantity: 0.2,
+          unitPrice: 0.18,
+          lineTotal: 0.18,
+        },
+      });
+      calculatedSubtotal += missingAmount;
+    }
+  }
   if (charges.statedSubtotal > 0 && calculatedSubtotal !== charges.statedSubtotal) {
     const subtotalAsItem = items.find((item) => item.lineTotal === charges.statedSubtotal);
     if (subtotalAsItem) {
@@ -736,6 +894,26 @@ export function receiptFromOcrLines(lines: OcrLine[]): EditableReceipt {
   if (charges.statedSubtotal === 0) {
     charges.statedSubtotal = calculatedSubtotal;
     chargeConfidence.statedSubtotal = 0.45;
+  }
+  if (
+    charges.statedSubtotal > 0 &&
+    charges.serviceCharge > charges.statedSubtotal &&
+    charges.receiptTotal < charges.statedSubtotal
+  ) {
+    const probableTotal = charges.serviceCharge;
+    const unallocatedCharge =
+      probableTotal -
+      (charges.statedSubtotal + charges.tax - charges.discount + charges.rounding);
+    if (unallocatedCharge >= 0 && unallocatedCharge <= charges.statedSubtotal * 0.3) {
+      charges.receiptTotal = probableTotal;
+      chargeConfidence.receiptTotal = Math.min(chargeConfidence.serviceCharge, 0.55);
+      charges.serviceCharge = 0;
+      chargeConfidence.serviceCharge = 0.28;
+      if (charges.tax === 0 && unallocatedCharge > 0) {
+        charges.tax = unallocatedCharge;
+        chargeConfidence.tax = 0.38;
+      }
+    }
   }
   if (charges.receiptTotal > 0) {
     if (charges.tax === 0 && charges.rounding > 0 && charges.statedSubtotal > 0) {
@@ -801,7 +979,12 @@ export type ReceiptScanAssessment = {
   itemSubtotal: number;
   coverage: number | null;
   mismatchRatio: number | null;
+  summaryMismatchRatio: number | null;
   suspiciousNames: number;
+  hasPlaceholder: boolean;
+  hasTrustedSubtotal: boolean;
+  hasTrustedTotal: boolean;
+  trustedSummaryFields: number;
   shouldEnhance: boolean;
 };
 
@@ -819,6 +1002,22 @@ export function assessReceiptScan(receipt: EditableReceipt): ReceiptScanAssessme
     (item) =>
       !meaningfulItemName(item.name) ||
       /^(?:rp\.?|idr)?\s*[\d.,]+$/i.test(item.name.trim()),
+  ).length;
+  const hasPlaceholder = receipt.items.some((item) =>
+    /^item belum terbaca$/i.test(item.name.trim()),
+  );
+  const expectedReceiptTotal =
+    statedSubtotal +
+    receipt.charges.tax +
+    receipt.charges.serviceCharge -
+    receipt.charges.discount +
+    receipt.charges.rounding;
+  const summaryMismatchRatio = hasTrustedTotal
+    ? Math.abs(expectedReceiptTotal - receipt.charges.receiptTotal) /
+      receipt.charges.receiptTotal
+    : null;
+  const trustedSummaryFields = Object.values(receipt.chargeConfidence).filter(
+    (confidence) => confidence >= 0.68,
   ).length;
   const confidenceValues = receipt.items.flatMap((item) => Object.values(item.confidence));
   const averageConfidence = confidenceValues.length
@@ -838,28 +1037,78 @@ export function assessReceiptScan(receipt: EditableReceipt): ReceiptScanAssessme
     itemSubtotal,
     coverage,
     mismatchRatio,
+    summaryMismatchRatio,
     suspiciousNames,
+    hasPlaceholder,
+    hasTrustedSubtotal,
+    hasTrustedTotal,
+    trustedSummaryFields,
     shouldEnhance:
+      hasPlaceholder ||
       suspiciousNames > 0 ||
       !hasTrustedSubtotal ||
       !hasTrustedTotal ||
-      (mismatchRatio !== null && mismatchRatio > 0.08) ||
+      (mismatchRatio !== null && mismatchRatio > 0.005) ||
       (receipt.items.length <= 2 && statedSubtotal > itemSubtotal * 1.5),
   };
+}
+
+export function shouldCrossCheckServerReceipt(receipt: EditableReceipt) {
+  const assessment = assessReceiptScan(receipt);
+  const charges = receipt.charges;
+  const summaryTotal =
+    charges.statedSubtotal +
+    charges.tax +
+    charges.serviceCharge -
+    charges.discount +
+    charges.rounding;
+  const summaryMismatch = Math.abs(summaryTotal - charges.receiptTotal);
+  const summaryTolerance = Math.max(100, Math.round(charges.receiptTotal * 0.01));
+  return (
+    assessment.shouldEnhance ||
+    receipt.items.length >= 20 ||
+    (charges.receiptTotal > 0 && summaryMismatch > summaryTolerance)
+  );
 }
 
 export function selectBestReceiptCandidate(candidates: EditableReceipt[]) {
   if (candidates.length === 0) throw new Error("ocr_no_items");
   return candidates
-    .map((receipt) => ({ receipt, assessment: assessReceiptScan(receipt) }))
+    .map((receipt, index) => ({ receipt, index, assessment: assessReceiptScan(receipt) }))
     .sort((a, b) => {
+      const tier = (assessment: ReceiptScanAssessment) => {
+        if (assessment.suspiciousNames > 0) return 0;
+        const exactItems =
+          assessment.mismatchRatio !== null && assessment.mismatchRatio <= 0.02;
+        const coherentSummary =
+          assessment.hasTrustedSubtotal &&
+          assessment.hasTrustedTotal &&
+          assessment.summaryMismatchRatio !== null &&
+          assessment.summaryMismatchRatio <= 0.01;
+        if (exactItems && coherentSummary) return assessment.hasPlaceholder ? 4 : 5;
+        if (exactItems) return assessment.hasPlaceholder ? 2 : 3;
+        if (assessment.mismatchRatio !== null && assessment.mismatchRatio <= 0.08) return 2;
+        return assessment.coverage === null ? 1 : 0;
+      };
+      const tierDifference = tier(b.assessment) - tier(a.assessment);
+      if (tierDifference !== 0) return tierDifference;
+      const trustedSummaryDifference =
+        b.assessment.trustedSummaryFields - a.assessment.trustedSummaryFields;
+      if (trustedSummaryDifference !== 0) return trustedSummaryDifference;
+      if (
+        tier(a.assessment) >= 2 &&
+        a.receipt.items.length !== b.receipt.items.length
+      ) {
+        return b.receipt.items.length - a.receipt.items.length;
+      }
       const bothUnanchored = a.assessment.coverage === null && b.assessment.coverage === null;
       if (bothUnanchored && a.receipt.items.length !== b.receipt.items.length) {
         return b.receipt.items.length - a.receipt.items.length;
       }
       return (
         b.assessment.score - a.assessment.score ||
-        b.receipt.items.length - a.receipt.items.length
+        b.receipt.items.length - a.receipt.items.length ||
+        a.index - b.index
       );
     })[0]!.receipt;
 }

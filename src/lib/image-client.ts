@@ -218,17 +218,29 @@ export async function prepareReceiptImage(file: File) {
   return variants[0] ?? file;
 }
 
+export function serverReceiptOutputSize(width: number, height: number) {
+  const safeWidth = Math.max(1, Math.round(width));
+  const safeHeight = Math.max(1, Math.round(height));
+  const maximumScale = MAX_SERVER_DIMENSION / Math.max(safeWidth, safeHeight);
+  const downscale = Math.min(1, maximumScale);
+  const upscale = Math.max(1, MIN_RECEIPT_WIDTH / safeWidth);
+  const scale = Math.min(maximumScale, Math.max(downscale, upscale));
+  return {
+    width: Math.max(1, Math.round(safeWidth * scale)),
+    height: Math.max(1, Math.round(safeHeight * scale)),
+  };
+}
+
 /** Produces a metadata-free, bounded upload for the private server OCR path. */
 export async function prepareServerReceiptImage(file: File) {
   if (typeof createImageBitmap !== "function") return null;
   try {
     const bitmap = await createImageBitmap(file);
     const crop = detectBounds(bitmap);
-    const scale = Math.min(1, MAX_SERVER_DIMENSION / Math.max(crop.width, crop.height));
-    let width = Math.max(1, Math.round(crop.width * scale));
-    let height = Math.max(1, Math.round(crop.height * scale));
+    const output = serverReceiptOutputSize(crop.width, crop.height);
+    let { width, height } = output;
     for (const quality of [0.86, 0.76, 0.66]) {
-      const canvas = renderReceiptCanvas(bitmap, crop, width, height, "grayscale(1) contrast(1.1)");
+      const canvas = renderReceiptCanvas(bitmap, crop, width, height, "grayscale(1) contrast(1.18)");
       const blob = canvas
         ? await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality))
         : null;

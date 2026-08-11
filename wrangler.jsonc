@@ -31,9 +31,15 @@
         }
       ],
       "vars": {
-        "RECEIPT_AI_PROVIDER": "disabled",
+        "RECEIPT_AI_PROVIDER": "cloudrun",
         "TURNSTILE_SITE_KEY": "0x4AAAAAAEMWbJRe26o7qMOx",
-        "TURNSTILE_EXPECTED_HOSTNAME": "bagiyuk.vivoy51577.workers.dev"
+        "TURNSTILE_EXPECTED_HOSTNAME": "bagiyuk.vivoy51577.workers.dev",
+        "CLOUD_RUN_OCR_URL": "https://bagiyuk-receipt-ocr-vf76ow3g7a-as.a.run.app",
+        "GOOGLE_SERVICE_ACCOUNT_EMAIL": "bagiyuk-worker-invoker@project-592af0e7-ebee-4483-88e.iam.gserviceaccount.com",
+        "GOOGLE_WIF_AUDIENCE": "//iam.googleapis.com/projects/513268340263/locations/global/workloadIdentityPools/bagiyuk-cloudflare/providers/bagiyuk-worker",
+        "GOOGLE_WIF_ISSUER": "https://bagiyuk.vivoy51577.workers.dev/wif",
+        "GOOGLE_WIF_SUBJECT": "bagiyuk-receipt-ocr-prod",
+        "GOOGLE_WIF_KEY_ID": "bagiyuk-msnoned9-dd58e93c"
       }
     }
   },

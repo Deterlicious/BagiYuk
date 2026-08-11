@@ -2,8 +2,9 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { normalizeAiReceipt } from "@/domain/receipt/normalize";
 import {
-  canonicalCloudRunOrigin,
   CloudRunReceiptParserProvider,
+  normalizeCloudRunProviderConfig,
+  type CloudRunProviderConfig,
 } from "@/features/receipt-parser/cloud-run-provider";
 import {
   CloudflareReceiptParserProvider,
@@ -37,7 +38,11 @@ type RuntimeEnv = CloudflareEnv & {
   TURNSTILE_EXPECTED_HOSTNAME?: string;
   CLOUD_RUN_OCR_URL?: string;
   GOOGLE_SERVICE_ACCOUNT_EMAIL?: string;
-  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
+  GOOGLE_WIF_AUDIENCE?: string;
+  GOOGLE_WIF_ISSUER?: string;
+  GOOGLE_WIF_SUBJECT?: string;
+  GOOGLE_WIF_PRIVATE_KEY?: string;
+  GOOGLE_WIF_KEY_ID?: string;
   RECEIPT_AI_PROVIDER?: string;
   RECEIPT_AI_MODEL?: string;
   RECEIPT_AI_FALLBACK_MODEL?: string;
@@ -123,29 +128,42 @@ function serverOcrConfigured(env: RuntimeEnv) {
         env.TURNSTILE_SITE_KEY &&
         env.TURNSTILE_SECRET_KEY &&
         env.TURNSTILE_EXPECTED_HOSTNAME &&
-        env.CLOUD_RUN_OCR_URL &&
-        canonicalCloudRunOrigin(env.CLOUD_RUN_OCR_URL) &&
-        env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
-        env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+        cloudRunConfig(env),
     )
   );
+}
+
+function cloudRunConfig(env: RuntimeEnv): CloudRunProviderConfig | null {
+  if (
+    !env.CLOUD_RUN_OCR_URL ||
+    !env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+    !env.GOOGLE_WIF_AUDIENCE ||
+    !env.GOOGLE_WIF_ISSUER ||
+    !env.GOOGLE_WIF_SUBJECT ||
+    !env.GOOGLE_WIF_PRIVATE_KEY ||
+    !env.GOOGLE_WIF_KEY_ID
+  ) {
+    return null;
+  }
+  return normalizeCloudRunProviderConfig({
+    url: env.CLOUD_RUN_OCR_URL,
+    serviceAccountEmail: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    wifAudience: env.GOOGLE_WIF_AUDIENCE,
+    wifIssuer: env.GOOGLE_WIF_ISSUER,
+    wifSubject: env.GOOGLE_WIF_SUBJECT,
+    wifPrivateKey: env.GOOGLE_WIF_PRIVATE_KEY,
+    wifKeyId: env.GOOGLE_WIF_KEY_ID,
+  });
 }
 
 async function getProvider(env: RuntimeEnv): Promise<ReceiptParserProvider> {
   const providerName = env.RECEIPT_AI_PROVIDER ?? process.env.RECEIPT_AI_PROVIDER ?? "disabled";
   if (providerName === "cloudrun") {
-    if (
-      !env.CLOUD_RUN_OCR_URL ||
-      !env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
-      !env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
-    ) {
+    const config = cloudRunConfig(env);
+    if (!config) {
       throw new ReceiptParserError("not_configured", "Layanan OCR server belum dikonfigurasi.");
     }
-    return new CloudRunReceiptParserProvider({
-      url: env.CLOUD_RUN_OCR_URL,
-      serviceAccountEmail: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      serviceAccountPrivateKey: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
-    });
+    return new CloudRunReceiptParserProvider(config);
   }
 
   if (providerName === "cloudflare") {

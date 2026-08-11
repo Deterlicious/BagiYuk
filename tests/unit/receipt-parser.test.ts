@@ -7,6 +7,7 @@ import {
   groupOcrLinesIntoRows,
   receiptFromOcrLines,
   selectBestReceiptCandidate,
+  shouldCrossCheckServerReceipt,
   type OcrLine,
 } from "@/features/receipt-parser/paddle-receipt-parser";
 import {
@@ -14,7 +15,7 @@ import {
   scanErrorMessage,
   validateReceiptFile,
 } from "@/features/receipt-parser/receipt-scan";
-import { findReceiptBounds } from "@/lib/image-client";
+import { findReceiptBounds, serverReceiptOutputSize } from "@/lib/image-client";
 import { getImageDimensions } from "@/lib/image";
 
 describe("receipt parser boundary", () => {
@@ -34,6 +35,37 @@ describe("receipt parser boundary", () => {
       { x: left, y: top + 24 },
     ],
   });
+
+  const shiftedPagiSoreTail = (includeParu: boolean) => {
+    const lines: OcrLine[] = [
+      ocrLine("Item", 40, 20, 300),
+      ocrLine("1 ITEM SEBELUMNYA", 72, 20, 340),
+      ocrLine("7,095,000", 72, 650, 800),
+      ocrLine("81,000", 105, 650, 800),
+    ];
+    const tail = [
+      ["3 SYR UBI TUMBUK", "19,000"],
+      ["1 TELOR GULAI", "63,000"],
+      ["3 PERKEDEL", "30,000"],
+      ["1 LIMPA", "31,000"],
+      ["1 AYAM RENDANG", "35,000"],
+      ["1 SAMBAL UDANG", "47,000"],
+      ["1 NILA BKR DABU2", "44,000"],
+      ["2 SYR NANGKA", "31,000"],
+    ] as const;
+    tail.forEach(([name, shiftedAmount], index) => {
+      const top = 128 + index * 32;
+      lines.push(ocrLine(name, top, 20, 420), ocrLine(shiftedAmount, top, 650, 800));
+    });
+    if (includeParu) lines.push(ocrLine("1 PARU", 128 + tail.length * 32, 20, 420));
+    lines.push(
+      ocrLine("Subtotal", 440, 20, 250),
+      ocrLine("7,476,000", 440, 650, 800),
+      ocrLine("Total", 480, 20, 250),
+      ocrLine("7,476,000", 480, 650, 800),
+    );
+    return lines;
+  };
 
   it("normalizes deterministic mock output into editable integer rupiah", async () => {
     const raw = await new MockReceiptParserProvider().parse({
@@ -520,6 +552,135 @@ describe("receipt parser boundary", () => {
     expect(assessReceiptScan(incomplete).shouldEnhance).toBe(true);
     expect(assessReceiptScan(complete).shouldEnhance).toBe(false);
     expect(selectBestReceiptCandidate([incomplete, complete]).items).toHaveLength(3);
+  });
+
+  it("cross-checks long server receipts and prefers the complete reconciled candidate", () => {
+    const candidate = (itemCount: number, score: number) => {
+      const lines = Array.from({ length: itemCount }, (_, index) =>
+        ocrLine(`1 Menu ${index + 1} 1,000`, 60 + index * 30, 20, 800, score),
+      );
+      const subtotal = itemCount * 1_000;
+      lines.push(ocrLine(`Subtotal ${subtotal.toLocaleString("en-US")}`, 80 + itemCount * 30));
+      lines.push(ocrLine(`Total ${subtotal.toLocaleString("en-US")}`, 110 + itemCount * 30));
+      return receiptFromOcrLines(lines);
+    };
+    const server = candidate(44, 0.99);
+    const local = candidate(45, 0.86);
+
+    expect(shouldCrossCheckServerReceipt(server)).toBe(true);
+    expect(selectBestReceiptCandidate([server, local]).items).toHaveLength(45);
+  });
+
+  it("keeps column labels when one price is missing and infers only the subtotal gap", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("Item", 40, 20, 300),
+      ocrLine("1 Menu A", 100, 20, 300),
+      ocrLine("10,000", 100, 650, 800),
+      ocrLine("1 Menu B", 140, 20, 300),
+      ocrLine("1 Menu C", 180, 20, 300),
+      ocrLine("30,000", 180, 650, 800),
+      ocrLine("Subtotal", 240, 20, 300),
+      ocrLine("60,000", 240, 650, 800),
+      ocrLine("Total", 280, 20, 300),
+      ocrLine("60,000", 280, 650, 800),
+    ]);
+
+    expect(receipt.items.map((item) => [item.name, item.lineTotal])).toEqual([
+      ["Menu A", 10_000],
+      ["Menu B", 20_000],
+      ["Menu C", 30_000],
+    ]);
+    expect(receipt.items[1]?.confidence.lineTotal).toBeLessThan(0.3);
+  });
+
+  it("repairs the shifted Pagi Sore tail using quantities and the printed subtotal", () => {
+    const receipt = receiptFromOcrLines(shiftedPagiSoreTail(true));
+    expect(receipt.items.slice(-9).map((item) => [item.name, item.quantity, item.lineTotal])).toEqual([
+      ["SYR UBI TUMBUK", 3, 81_000],
+      ["TELOR GULAI", 1, 19_000],
+      ["PERKEDEL", 3, 63_000],
+      ["LIMPA", 1, 30_000],
+      ["AYAM RENDANG", 1, 31_000],
+      ["SAMBAL UDANG", 1, 35_000],
+      ["NILA BKR DABU2", 1, 47_000],
+      ["SYR NANGKA", 2, 44_000],
+      ["PARU", 1, 31_000],
+    ]);
+    expect(receipt.items.some((item) => item.name === "Item belum terbaca")).toBe(false);
+    expect(receipt.items.reduce((sum, item) => sum + item.lineTotal, 0)).toBe(7_476_000);
+    expect(receipt.items.at(-9)?.confidence.lineTotal).toBeLessThan(0.4);
+  });
+
+  it("keeps the displaced PARU amount as a low-confidence placeholder when its label is absent", () => {
+    const receipt = receiptFromOcrLines(shiftedPagiSoreTail(false));
+
+    expect(receipt.items.slice(-9).map((item) => [item.name, item.lineTotal])).toEqual([
+      ["SYR UBI TUMBUK", 81_000],
+      ["TELOR GULAI", 19_000],
+      ["PERKEDEL", 63_000],
+      ["LIMPA", 30_000],
+      ["AYAM RENDANG", 31_000],
+      ["SAMBAL UDANG", 35_000],
+      ["NILA BKR DABU2", 47_000],
+      ["SYR NANGKA", 44_000],
+      ["Item belum terbaca", 31_000],
+    ]);
+    expect(receipt.items.at(-1)?.confidence.name).toBeLessThan(0.2);
+    expect(receipt.items.reduce((sum, item) => sum + item.lineTotal, 0)).toBe(7_476_000);
+    expect(shouldCrossCheckServerReceipt(receipt)).toBe(true);
+
+    const incompleteServer = structuredClone(receipt);
+    incompleteServer.items = incompleteServer.items.slice(0, -1);
+    incompleteServer.charges.statedSubtotal = 7_445_000;
+    incompleteServer.charges.receiptTotal = 0;
+    incompleteServer.chargeConfidence.receiptTotal = 0.2;
+    expect(selectBestReceiptCandidate([incompleteServer, receipt])).toBe(receipt);
+
+    const completeServer = structuredClone(incompleteServer);
+    completeServer.charges.receiptTotal = 7_445_000;
+    completeServer.chargeConfidence.receiptTotal = 0.95;
+    expect(selectBestReceiptCandidate([completeServer, receipt])).toBe(completeServer);
+  });
+
+  it("repairs a printed total misclassified as an impossible service charge", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("1 Menu A 100,000", 80),
+      ocrLine("Subtotal 100,000", 140),
+      ocrLine("Charge 110,000", 180),
+      ocrLine("Total 1", 220),
+    ]);
+
+    expect(receipt.charges).toMatchObject({
+      statedSubtotal: 100_000,
+      tax: 10_000,
+      serviceCharge: 0,
+      receiptTotal: 110_000,
+    });
+    expect(receipt.chargeConfidence.tax).toBeLessThan(0.5);
+  });
+
+  it("surfaces one low-confidence placeholder instead of hiding a small subtotal gap", () => {
+    const receipt = receiptFromOcrLines([
+      ocrLine("1 Menu A 10,000", 80),
+      ocrLine("1 Menu C 40,000", 120),
+      ocrLine("Subtotal 60,000", 180),
+      ocrLine("Total 60,000", 220),
+    ]);
+
+    expect(receipt.items).toHaveLength(3);
+    expect(receipt.items.at(-1)).toMatchObject({
+      name: "Item belum terbaca",
+      quantity: 1,
+      lineTotal: 10_000,
+    });
+    expect(receipt.items.at(-1)?.confidence.name).toBeLessThan(0.2);
+    expect(receipt.items.reduce((sum, item) => sum + item.lineTotal, 0)).toBe(60_000);
+  });
+
+  it("upscales a narrow server crop without exceeding the upload dimension cap", () => {
+    const output = serverReceiptOutputSize(420, 1_300);
+    expect(output.width).toBeGreaterThan(420);
+    expect(Math.max(output.width, output.height)).toBeLessThanOrEqual(2_500);
   });
 
   it("reconciles a common tax amount when OCR attaches it to the rounding label", () => {
