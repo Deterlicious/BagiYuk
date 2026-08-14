@@ -3,12 +3,14 @@ import {
   ArrowRight,
   Camera,
   Check,
+  ListChecks,
   LockKeyhole,
   ReceiptText,
   Send,
   UsersRound,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand/brand-mark";
+import { ResumeDraftCard } from "@/components/home/resume-draft-card";
 import { buttonStyles } from "@/components/ui/button";
 import { formatRupiah } from "@/lib/currency";
 
@@ -26,6 +28,9 @@ export default function HomePage() {
         <nav className="flex items-center gap-1" aria-label="Navigasi utama">
           <Link href="/bantuan" className="rounded-lg px-3 py-2 text-sm font-bold text-muted transition hover:bg-brand/8 hover:text-brand-strong focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25">
             Bantuan
+          </Link>
+          <Link href="/privasi" className="hidden rounded-lg px-3 py-2 text-sm font-bold text-muted transition hover:bg-brand/8 hover:text-brand-strong focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25 sm:block">
+            Privasi
           </Link>
           <Link
             href="/split/new?fresh=1"
@@ -113,23 +118,27 @@ export default function HomePage() {
         </div>
       </section>
 
+      <ResumeDraftCard />
+
       <section className="border-y border-line bg-surface/80">
         <div className="mx-auto w-full max-w-[1160px] px-5 py-14 sm:px-8 lg:px-10 lg:py-16">
           <p className="text-sm font-extrabold tracking-[0.1em] text-brand uppercase">Dari struk ke hasil</p>
-          <h2 className="mt-2 text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">Tiga langkah yang mudah dijelaskan.</h2>
-          <ol className="mt-9 grid border-y border-line md:grid-cols-3 md:divide-x md:divide-line">
+          <h2 className="mt-2 text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">Lima langkah, satu hasil yang jelas.</h2>
+          <ol className="mt-9 grid border-y border-line sm:grid-cols-2 lg:grid-cols-5 lg:divide-x lg:divide-line">
             {[
               { icon: Camera, title: "Foto struk", text: "Ambil foto atau masukkan semua item secara manual." },
-              { icon: UsersRound, title: "Pilih pesanan", text: "Periksa harga lalu pilih pemilik setiap item bersama." },
-              { icon: Send, title: "Bagikan hasil", text: "Dapatkan total per orang yang sudah direkonsiliasi." },
+              { icon: ReceiptText, title: "Periksa hasil", text: "Koreksi item dan angka sebelum hitungan digunakan." },
+              { icon: UsersRound, title: "Tambah anggota", text: "Masukkan semua orang yang ikut dalam tagihan." },
+              { icon: ListChecks, title: "Bagikan item", text: "Pilih pemilik dan atur porsi untuk item bersama." },
+              { icon: Send, title: "Bagikan hasil", text: "Kirim total dan instruksi pelunasan yang transparan." },
             ].map((step, index) => {
               const Icon = step.icon;
               return (
-                <li key={step.title} className="grid grid-cols-[48px_1fr] gap-4 border-b border-line py-6 last:border-b-0 md:block md:border-b-0 md:px-7 md:first:pl-0 md:last:pr-0">
+                <li key={step.title} className="grid grid-cols-[48px_1fr] gap-4 border-b border-line py-6 sm:px-4 lg:block lg:border-b-0 lg:px-5 lg:first:pl-0 lg:last:pr-0">
                   <span className="grid size-11 place-items-center rounded-xl border border-line bg-white text-brand shadow-sm">
                     <Icon aria-hidden="true" size={21} />
                   </span>
-                  <div className="md:mt-5">
+                  <div className="lg:mt-5">
                     <p className="text-xs font-extrabold tracking-[0.08em] text-accent uppercase">0{index + 1}</p>
                     <h3 className="mt-1 text-lg font-extrabold">{step.title}</h3>
                     <p className="mt-2 text-sm leading-6 text-muted">{step.text}</p>
@@ -144,7 +153,9 @@ export default function HomePage() {
       <footer className="mx-auto flex w-full max-w-[1160px] flex-col gap-3 px-5 py-8 text-sm text-muted sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
         <BrandMark />
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 sm:justify-end">
-          <Link href="/bantuan" className="font-bold text-brand-strong hover:underline">Bantuan & privasi</Link>
+          <Link href="/bantuan" className="font-bold text-brand-strong hover:underline">Bantuan</Link>
+          <Link href="/privasi" className="font-bold text-brand-strong hover:underline">Privasi</Link>
+          <Link href="/diagnostik" className="font-bold text-brand-strong hover:underline">Diagnostik</Link>
           <p>Hitungan final selalu dikerjakan secara deterministik, bukan oleh AI.</p>
         </div>
       </footer>

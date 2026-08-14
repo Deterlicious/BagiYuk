@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Clipboard, Download, MessageCircle, Pencil, Share2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, Check, CheckCircle2, Clipboard, Download, MessageCircle, Pencil, Printer, Share2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ResetDialog } from "@/components/ui/reset-dialog";
@@ -11,7 +11,7 @@ import type { EditableReceipt } from "@/domain/receipt/types";
 import { formatRupiah } from "@/lib/currency";
 import { trackProductEvent } from "@/lib/analytics";
 import { createResultImage, downloadBlob } from "@/lib/result-image";
-import { buildParticipantShareText, buildShareText, copyText, whatsappShareUrl } from "@/lib/share";
+import { buildParticipantShareText, buildSettlementText, buildShareText, copyText, whatsappShareUrl } from "@/lib/share";
 import { avatarColor, initials } from "@/lib/utils";
 
 export function ResultsStep({
@@ -31,6 +31,7 @@ export function ResultsStep({
 }) {
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
+  const [payerId, setPayerId] = useState("");
 
   function notify(text: string, tone: "success" | "error" = "success") {
     setMessage(text);
@@ -73,10 +74,12 @@ export function ResultsStep({
   }
 
   const result = calculation.result;
+  const payer = result.participants.find(({ participant }) => participant.id === payerId)?.participant;
   const shareText = buildShareText({
     merchantName: receipt.merchantName,
     result,
     hasFees: receipt.charges.tax > 0 || receipt.charges.serviceCharge > 0,
+    payerName: payer?.name,
   });
 
   async function copyResult() {
@@ -106,7 +109,7 @@ export function ResultsStep({
 
   async function copyParticipant(allocation: (typeof result.participants)[number]) {
     try {
-      await copyText(buildParticipantShareText({ merchantName: receipt.merchantName, allocation }));
+      await copyText(buildParticipantShareText({ merchantName: receipt.merchantName, allocation, payerName: payer?.name }));
       notify(`Pesan untuk ${allocation.participant.name} berhasil disalin.`);
       trackProductEvent("participant_copied");
     } catch {
@@ -115,7 +118,7 @@ export function ResultsStep({
   }
 
   function shareParticipant(allocation: (typeof result.participants)[number]) {
-    const text = buildParticipantShareText({ merchantName: receipt.merchantName, allocation });
+    const text = buildParticipantShareText({ merchantName: receipt.merchantName, allocation, payerName: payer?.name });
     window.open(whatsappShareUrl(text), "_blank", "noopener,noreferrer");
     notify(`Pesan untuk ${allocation.participant.name} dibuka di WhatsApp.`);
     trackProductEvent("participant_shared");
@@ -129,6 +132,16 @@ export function ResultsStep({
       trackProductEvent("result_image_downloaded");
     } catch {
       notify("Gambar belum dapat dibuat di browser ini. Gunakan salin ringkasan.", "error");
+    }
+  }
+
+  async function copySettlement() {
+    if (!payer) return;
+    try {
+      await copyText(buildSettlementText({ merchantName: receipt.merchantName, result, payerName: payer.name }));
+      notify("Instruksi pelunasan berhasil disalin.");
+    } catch {
+      notify("Instruksi belum dapat disalin. Coba salin ringkasan lengkap.", "error");
     }
   }
 
@@ -192,6 +205,37 @@ export function ResultsStep({
           <p className="mt-3 border-t border-current/10 pt-3 text-xs font-bold text-warning">
             Subtotal item berbeda {formatRupiah(reconciliation.subtotalDifference)} dari subtotal yang ditulis pada struk.
           </p>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5 print:hidden">
+        <div className="flex items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/8 text-brand"><ArrowRightLeft aria-hidden="true" size={20} /></span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-extrabold">Siapa yang membayar ke restoran?</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">Opsional. Pilih orang yang menalangi agar BagiYuk membuat instruksi transfer—tanpa memproses pembayaran.</p>
+          </div>
+        </div>
+        <label htmlFor="payer" className="mt-4 block text-sm font-bold text-muted">Pembayar awal</label>
+        <select id="payer" value={payerId} onChange={(event) => setPayerId(event.target.value)} className="mt-2 min-h-12 w-full rounded-xl border border-line bg-white px-3 text-base font-bold outline-none focus:border-brand focus:ring-3 focus:ring-brand/15">
+          <option value="">Belum ditentukan</option>
+          {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.name}</option>)}
+        </select>
+        {payer && (
+          <div className="mt-4 rounded-xl border border-brand/15 bg-brand/5 p-4">
+            <p className="text-xs font-extrabold tracking-[0.08em] text-brand uppercase">Instruksi pelunasan</p>
+            <ul className="mt-3 space-y-2 text-sm">
+              {result.participants.filter(({ participant }) => participant.id !== payer.id).map((allocation) => (
+                <li key={allocation.participant.id} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate"><strong>{allocation.participant.name}</strong> → {payer.name}</span>
+                  <strong className="price shrink-0 text-brand-strong">{formatRupiah(allocation.total)}</strong>
+                </li>
+              ))}
+            </ul>
+            <Button variant="secondary" size="small" className="mt-4 w-full" onClick={() => void copySettlement()}>
+              <Clipboard aria-hidden="true" size={16} /> Salin instruksi pelunasan
+            </Button>
+          </div>
         )}
       </div>
 
@@ -272,7 +316,7 @@ export function ResultsStep({
         <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-canvas p-4 font-sans text-sm leading-6 text-ink">
           {shareText}
         </pre>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 print:hidden">
           <Button onClick={shareResult}>
             <Share2 aria-hidden="true" size={18} />
             Bagikan hasil
@@ -285,12 +329,16 @@ export function ResultsStep({
             <Download aria-hidden="true" size={18} />
             Unduh gambar
           </Button>
+          <Button variant="secondary" onClick={() => window.print()}>
+            <Printer aria-hidden="true" size={18} />
+            Cetak / PDF
+          </Button>
         </div>
       </div>
 
       <Toast message={message} tone={messageTone} onDismiss={() => setMessage("")} />
 
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-2 print:hidden">
         <Button variant="ghost" size="small" onClick={onBack}>
           <ArrowLeft aria-hidden="true" size={17} />
           Ubah pembagian
@@ -302,7 +350,7 @@ export function ResultsStep({
         <ResetDialog onConfirm={onReset} />
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/96 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-md sm:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/96 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-md sm:hidden print:hidden">
         <Button className="w-full" onClick={shareResult}>
           <Share2 aria-hidden="true" size={18} />
           Bagikan hasil

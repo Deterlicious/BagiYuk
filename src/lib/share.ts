@@ -5,10 +5,12 @@ export function buildShareText({
   merchantName,
   result,
   hasFees,
+  payerName,
 }: {
   merchantName: string;
   result: SplitResult;
   hasFees: boolean;
+  payerName?: string;
 }) {
   const title = merchantName.trim() || "Makan Bareng";
   const lines = result.participants.map(
@@ -21,15 +23,26 @@ export function buildShareText({
     "",
     `Total: ${formatRupiah(result.reconciliation.allocatedTotal)}`,
     hasFees ? "Pajak dan layanan sudah termasuk." : "Sudah dibagi per pesanan.",
+    ...(payerName
+      ? [
+          "",
+          `Pembayaran ditanggung dulu oleh ${payerName}:`,
+          ...result.participants
+            .filter(({ participant }) => participant.name !== payerName)
+            .map(({ participant, total }) => `${participant.name} → ${payerName}: ${formatRupiah(total)}`),
+        ]
+      : []),
   ].join("\n");
 }
 
 export function buildParticipantShareText({
   merchantName,
   allocation,
+  payerName,
 }: {
   merchantName: string;
   allocation: ParticipantAllocation;
+  payerName?: string;
 }) {
   const title = merchantName.trim() || "makan bareng";
   const itemLines = allocation.items.map(
@@ -49,7 +62,31 @@ export function buildParticipantShareText({
     ...(feeLines.length ? ["", ...feeLines] : []),
     "",
     `Total: ${formatRupiah(allocation.total)}`,
+    ...(payerName && payerName !== allocation.participant.name
+      ? [`Transfer ke ${payerName}: ${formatRupiah(allocation.total)}`]
+      : payerName
+        ? ["Kamu menalangi pembayaran restoran; total di atas adalah bagianmu sendiri."]
+        : []),
     "Dihitung dengan BagiYuk.",
+  ].join("\n");
+}
+
+export function buildSettlementText({
+  merchantName,
+  result,
+  payerName,
+}: {
+  merchantName: string;
+  result: SplitResult;
+  payerName: string;
+}) {
+  return [
+    `Pelunasan BagiYuk — ${merchantName.trim() || "Makan Bareng"}`,
+    `Dibayar dulu oleh ${payerName}.`,
+    "",
+    ...result.participants
+      .filter(({ participant }) => participant.name !== payerName)
+      .map(({ participant, total }) => `${participant.name} → ${payerName}: ${formatRupiah(total)}`),
   ].join("\n");
 }
 

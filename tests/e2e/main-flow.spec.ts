@@ -12,27 +12,21 @@ test("complete sample bill split, copy, return, and reset", async ({ page, conte
   await firstItemName.fill("Nasi Goreng Kampung pedas");
   await page.getByRole("button", { name: "Lanjut ke anggota" }).click();
 
-  const participantInput = page.getByLabel("Nama anggota", { exact: true });
-  for (const participant of ["Ayu", "Bima", "Citra"]) {
-    await participantInput.fill(participant);
-    await page.getByRole("button", { name: "Tambahkan" }).click();
-  }
   await expect(page.getByText("3 orang", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pilih pesanan" }).click();
 
   const itemCards = page.getByRole("article");
-  await itemCards.nth(0).getByText("Ayu", { exact: true }).click();
-  await itemCards.nth(1).getByRole("button", { name: "Pilih semua" }).click();
-  await itemCards.nth(2).getByText("Bima", { exact: true }).click();
-  await itemCards.nth(3).getByText("Citra", { exact: true }).click();
-
   await expect(page.getByText("4 dari 4 item")).toBeVisible();
+  await itemCards.nth(3).getByRole("button", { name: "Tambah porsi Bima" }).click();
+  await expect(itemCards.nth(3).getByText("2×", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Lihat hasil" }).click();
   await expect(page.getByText("Total cocok sampai rupiah terakhir")).toBeVisible();
   await expect(page.getByText(/Rp\s*111\.000/).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Salin ringkasan" }).click();
   await expect(page.getByText("Ringkasan berhasil disalin.")).toBeVisible();
+  await page.getByLabel("Pembayar awal").selectOption({ label: "Bima" });
+  await expect(page.getByText("Instruksi pelunasan", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Ubah pembagian" }).click();
   await expect(page.getByRole("heading", { name: "Siapa memesan apa?" })).toBeVisible();
@@ -92,11 +86,6 @@ test("professional shortcuts, individual share, and help remain accessible", asy
   await page.goto("/split/new?sample=1");
   await page.getByRole("button", { name: "Lanjut ke anggota" }).click();
 
-  const participantInput = page.getByLabel("Nama anggota", { exact: true });
-  for (const participant of ["Ayu", "Bima"]) {
-    await participantInput.fill(participant);
-    await page.getByRole("button", { name: "Tambahkan" }).click();
-  }
   await page.getByRole("button", { name: "Duplikat Ayu" }).click();
   await expect(page.locator('input[value="Ayu 2"]')).toBeVisible();
   await page.getByRole("button", { name: "Pilih pesanan" }).click();
@@ -113,6 +102,10 @@ test("professional shortcuts, individual share, and help remain accessible", asy
   await page.goto("/bantuan");
   await expect(page.getByRole("heading", { name: "Hasil yang akurat dimulai dari pemeriksaan yang jelas." })).toBeVisible();
   await expect(page.getByText("Privasi struk", { exact: true })).toBeVisible();
+  await page.goto("/privasi");
+  await expect(page.getByRole("heading", { name: "Strukmu diproses seperlunya, bukan dikoleksi." })).toBeVisible();
+  await page.goto("/diagnostik");
+  await expect(page.getByRole("heading", { name: "Pastikan perangkat siap sebelum memindai." })).toBeVisible();
 });
 
 test("server quota explains the local fallback without blocking manual recovery", async ({ page }) => {

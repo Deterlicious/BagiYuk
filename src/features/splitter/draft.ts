@@ -53,12 +53,26 @@ export function createEmptyDraft(): DraftState {
 }
 
 export function createSampleDraft(): DraftState {
+  const participants: Participant[] = [
+    { id: "sample-person-ayu", name: "Ayu" },
+    { id: "sample-person-bima", name: "Bima" },
+    { id: "sample-person-citra", name: "Citra" },
+  ];
   return {
     version: 1,
     step: 2,
     receipt: structuredClone(sampleReceipt),
-    participants: [],
-    assignments: [],
+    participants,
+    assignments: [
+      { itemId: "sample-item-1", participantIds: [participants[0]!.id] },
+      { itemId: "sample-item-2", participantIds: [participants[1]!.id] },
+      { itemId: "sample-item-3", participantIds: [participants[2]!.id] },
+      {
+        itemId: "sample-item-4",
+        participantIds: [participants[0]!.id, participants[1]!.id],
+        weights: { [participants[0]!.id]: 1, [participants[1]!.id]: 1 },
+      },
+    ],
   };
 }
 

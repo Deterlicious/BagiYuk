@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, ArrowRight, CircleCheckBig, CopyPlus, Plus, ReceiptText, ScanSearch, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CircleCheckBig, CopyPlus, ImageIcon, Plus, ReceiptText, ScanSearch, Trash2, ZoomIn } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MoneyInput } from "@/components/ui/money-input";
 import type { EditableReceipt, EditableReceiptItem, ReceiptChargeConfidence } from "@/domain/receipt/types";
@@ -40,13 +40,37 @@ function FieldCheck({ confidence }: { confidence: number }) {
   );
 }
 
+function ReceiptPhotoReview({ photo }: { photo: File }) {
+  const [photoUrl] = useState(() => URL.createObjectURL(photo));
+  useEffect(() => () => URL.revokeObjectURL(photoUrl), [photoUrl]);
+  return (
+    <details className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-extrabold marker:hidden sm:px-5">
+        <span className="flex items-center gap-3">
+          <span className="grid size-9 place-items-center rounded-xl bg-brand/8 text-brand"><ImageIcon aria-hidden="true" size={19} /></span>
+          Cocokkan dengan foto asli
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted"><ZoomIn aria-hidden="true" size={15} /> Buka foto</span>
+      </summary>
+      <div className="border-t border-line bg-[#eee9df] p-3 sm:p-4">
+        {/* The blob URL is memory-only and is released when this step unmounts. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={photoUrl} alt="Foto struk asli untuk verifikasi" className="mx-auto max-h-[70vh] w-full rounded-xl object-contain" />
+        <p className="mt-3 text-center text-xs leading-5 text-muted">Foto ini hanya tersedia selama sesi berjalan dan tidak disimpan ke draft.</p>
+      </div>
+    </details>
+  );
+}
+
 export function VerificationStep({
   receipt,
+  receiptPhoto,
   onChange,
   onBack,
   onContinue,
 }: {
   receipt: EditableReceipt;
+  receiptPhoto?: File | null;
   onChange: (receipt: EditableReceipt) => void;
   onBack: () => void;
   onContinue: () => void;
@@ -194,6 +218,8 @@ export function VerificationStep({
           Semua hasil scan wajib diperiksa. Label <strong className="text-warning">Periksa</strong> menandai bagian yang kurang yakin terbaca.
         </p>
       </div>
+
+      {receiptPhoto && <ReceiptPhotoReview key={`${receiptPhoto.name}-${receiptPhoto.lastModified}`} photo={receiptPhoto} />}
 
       <div className={`mt-6 flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 ${lowConfidenceCount > 0 ? "border-warning/30 bg-amber-50" : "border-success/25 bg-[#edf7f2]"}`} role="status">
         <div className="flex items-start gap-3">

@@ -46,6 +46,7 @@ export function SplitWizard({
 }) {
   const [state, dispatch] = useReducer(draftReducer, undefined, createEmptyDraft);
   const [hydrated, setHydrated] = useState(false);
+  const [receiptPhoto, setReceiptPhoto] = useState<File | null>(null);
 
   useEffect(() => {
     if (initialSample) {
@@ -101,6 +102,7 @@ export function SplitWizard({
 
   function reset() {
     window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    setReceiptPhoto(null);
     dispatch({ type: "reset" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -119,6 +121,7 @@ export function SplitWizard({
       },
     ];
     setReceipt(receipt);
+    setReceiptPhoto(null);
     setStep(2);
   }
 
@@ -187,10 +190,12 @@ export function SplitWizard({
                 onManual={startManual}
                 onSample={() => {
                   trackProductEvent("wizard_sample_started");
+                  setReceiptPhoto(null);
                   dispatch({ type: "hydrate", draft: createSampleDraft() });
                 }}
-                onParsed={(receipt) => {
+                onParsed={(receipt, photo) => {
                   setReceipt(receipt);
+                  setReceiptPhoto(photo);
                   setStep(2);
                 }}
               />
@@ -198,6 +203,7 @@ export function SplitWizard({
             {state.step === 2 && (
               <VerificationStep
                 receipt={state.receipt}
+                receiptPhoto={receiptPhoto}
                 onChange={setReceipt}
                 onBack={() => setStep(1)}
                 onContinue={() => setStep(3)}

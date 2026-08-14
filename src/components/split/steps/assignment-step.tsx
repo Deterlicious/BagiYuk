@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Eraser, Sparkles, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Eraser, Minus, Plus, Sparkles, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { calculateSplit } from "@/domain/billing/calculate-split";
@@ -54,16 +54,40 @@ export function AssignmentStep({
     return assignments.find((assignment) => assignment.itemId === itemId)?.participantIds ?? [];
   }
 
+  function weightFor(itemId: string, participantId: string) {
+    return assignments.find((assignment) => assignment.itemId === itemId)?.weights?.[participantId] ?? 1;
+  }
+
   function setOwners(itemId: string, participantIds: string[]) {
     const existing = assignments.find((assignment) => assignment.itemId === itemId);
+    const weights = Object.fromEntries(
+      participantIds.map((participantId) => [participantId, existing?.weights?.[participantId] ?? 1]),
+    );
     const next = existing
       ? assignments.map((assignment) =>
           assignment.itemId === itemId
-            ? { itemId, participantIds }
+            ? { itemId, participantIds, ...(participantIds.length > 0 ? { weights } : {}) }
             : assignment,
         )
-      : [...assignments, { itemId, participantIds }];
+      : [...assignments, { itemId, participantIds, ...(participantIds.length > 0 ? { weights } : {}) }];
     onChange(next);
+    setError("");
+  }
+
+  function setWeight(itemId: string, participantId: string, weight: number) {
+    const nextWeight = Math.max(1, Math.min(20, weight));
+    onChange(assignments.map((assignment) => {
+      if (assignment.itemId !== itemId) return assignment;
+      return {
+        ...assignment,
+        weights: Object.fromEntries(
+          assignment.participantIds.map((id) => [
+            id,
+            id === participantId ? nextWeight : assignment.weights?.[id] ?? 1,
+          ]),
+        ),
+      };
+    }));
     setError("");
   }
 
@@ -86,8 +110,9 @@ export function AssignmentStep({
   function fillUnassigned() {
     if (!bulkParticipantId) return;
     onChange(items.map((item) => {
-      const owners = ownersFor(item.id);
-      return { itemId: item.id, participantIds: owners.length > 0 ? owners : [bulkParticipantId] };
+      const existing = assignments.find((assignment) => assignment.itemId === item.id);
+      if (existing?.participantIds.length) return existing;
+      return { itemId: item.id, participantIds: [bulkParticipantId], weights: { [bulkParticipantId]: 1 } };
     }));
     setError("");
     trackProductEvent("assignment_bulk_used");
@@ -111,7 +136,7 @@ export function AssignmentStep({
             Siapa memesan apa?
           </h1>
           <p className="mt-3 text-base leading-7 text-muted">
-            Pilih satu orang atau lebih. Item bersama dibagi rata sampai ke rupiah terakhir.
+            Pilih satu orang atau lebih. Item bersama dibagi rata secara default, atau atur porsi 2:1 bila pesanan tidak sama.
           </p>
         </div>
         <div className="shrink-0 rounded-xl border border-line bg-surface px-4 py-3">
@@ -187,36 +212,61 @@ export function AssignmentStep({
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {participants.map((participant) => {
                     const selected = owners.includes(participant.id);
+                    const weight = weightFor(item.id, participant.id);
                     return (
-                      <label
+                      <div
                         key={participant.id}
-                        className={`flex min-h-13 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition focus-within:ring-3 focus-within:ring-brand/20 ${
+                        className={`overflow-hidden rounded-xl border transition focus-within:ring-3 focus-within:ring-brand/20 ${
                           selected
                             ? "border-brand bg-brand/7 text-brand-strong"
                             : "border-line bg-white text-ink hover:border-brand/50"
                         }`}
                       >
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={selected}
-                          onChange={() => toggleOwner(item.id, participant.id)}
-                        />
-                        <span
-                          className="grid size-9 shrink-0 place-items-center rounded-full text-xs font-extrabold text-ink"
-                          style={{ backgroundColor: avatarColor(participant.id) }}
-                          aria-hidden="true"
-                        >
-                          {initials(participant.name)}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-extrabold">{participant.name}</span>
-                        <span
-                          className={`grid size-6 shrink-0 place-items-center rounded-md border ${selected ? "border-brand bg-brand text-white" : "border-line bg-white"}`}
-                          aria-hidden="true"
-                        >
-                          {selected && <Check size={15} strokeWidth={3} />}
-                        </span>
-                      </label>
+                        <label className="flex min-h-13 cursor-pointer items-center gap-3 px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={selected}
+                            onChange={() => toggleOwner(item.id, participant.id)}
+                          />
+                          <span
+                            className="grid size-9 shrink-0 place-items-center rounded-full text-xs font-extrabold text-ink"
+                            style={{ backgroundColor: avatarColor(participant.id) }}
+                            aria-hidden="true"
+                          >
+                            {initials(participant.name)}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-extrabold">{participant.name}</span>
+                          <span
+                            className={`grid size-6 shrink-0 place-items-center rounded-md border ${selected ? "border-brand bg-brand text-white" : "border-line bg-white"}`}
+                            aria-hidden="true"
+                          >
+                            {selected && <Check size={15} strokeWidth={3} />}
+                          </span>
+                        </label>
+                        {selected && owners.length > 1 && (
+                          <div className="flex items-center justify-between gap-2 border-t border-brand/15 px-3 py-2">
+                            <span className="text-xs font-bold text-muted">Porsi</span>
+                            <div className="flex items-center gap-1" role="group" aria-label={`Porsi ${participant.name} untuk ${item.name}`}>
+                              <button
+                                type="button"
+                                className="grid size-9 place-items-center rounded-lg text-brand transition hover:bg-brand/10 disabled:opacity-35"
+                                onClick={() => setWeight(item.id, participant.id, weight - 1)}
+                                disabled={weight <= 1}
+                                aria-label={`Kurangi porsi ${participant.name}`}
+                              ><Minus aria-hidden="true" size={15} /></button>
+                              <output className="price min-w-8 text-center text-sm font-extrabold" aria-live="polite">{weight}×</output>
+                              <button
+                                type="button"
+                                className="grid size-9 place-items-center rounded-lg text-brand transition hover:bg-brand/10 disabled:opacity-35"
+                                onClick={() => setWeight(item.id, participant.id, weight + 1)}
+                                disabled={weight >= 20}
+                                aria-label={`Tambah porsi ${participant.name}`}
+                              ><Plus aria-hidden="true" size={15} /></button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

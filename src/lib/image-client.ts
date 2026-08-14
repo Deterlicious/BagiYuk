@@ -7,6 +7,18 @@ const MAX_SERVER_BYTES = 4 * 1024 * 1024;
 
 type ReceiptBounds = { x: number; y: number; width: number; height: number };
 
+export type ReceiptPhotoAssessment = {
+  resolution: "good" | "low";
+  lighting: "good" | "dark" | "bright";
+  sharpness: "good" | "soft";
+  framing: "good" | "check";
+  width: number;
+  height: number;
+  issues: string[];
+};
+
+export type ReceiptImageOptions = { autoCrop?: boolean };
+
 function longestQualifiedRun(values: number[], threshold: number) {
   let bestStart = -1;
   let bestEnd = -1;
@@ -114,6 +126,66 @@ function detectBounds(bitmap: ImageBitmap): ReceiptBounds {
   };
 }
 
+/** Runs a lightweight, non-blocking photo check entirely in the browser. */
+export async function assessReceiptPhoto(file: File): Promise<ReceiptPhotoAssessment | null> {
+  if (typeof createImageBitmap !== "function") return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 240 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      bitmap.close();
+      return null;
+    }
+    context.drawImage(bitmap, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    let luminanceSum = 0;
+    let edgeSum = 0;
+    let previous = 0;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const luminance =
+        (pixels[offset] ?? 0) * 0.299 +
+        (pixels[offset + 1] ?? 0) * 0.587 +
+        (pixels[offset + 2] ?? 0) * 0.114;
+      luminanceSum += luminance;
+      if (offset > 0 && (offset / 4) % width !== 0) edgeSum += Math.abs(luminance - previous);
+      previous = luminance;
+    }
+    const pixelCount = Math.max(1, pixels.length / 4);
+    const averageLuminance = luminanceSum / pixelCount;
+    const averageEdge = edgeSum / pixelCount;
+    const bounds = findReceiptBounds(pixels, width, height);
+    const resolution = Math.max(bitmap.width, bitmap.height) >= 1_200 ? "good" : "low";
+    const lighting = averageLuminance < 72 ? "dark" : averageLuminance > 236 ? "bright" : "good";
+    const sharpness = averageEdge >= 7 ? "good" : "soft";
+    const framing = bounds ? "good" : "check";
+    const issues: string[] = [];
+    if (resolution === "low") issues.push("Resolusi cukup rendah; dekatkan kamera ke struk.");
+    if (lighting === "dark") issues.push("Foto terlihat gelap; tambah cahaya tanpa menyalakan flash langsung.");
+    if (lighting === "bright") issues.push("Foto terlalu terang; hindari pantulan pada kertas.");
+    if (sharpness === "soft") issues.push("Tulisan tampak kurang tajam; tahan HP lebih stabil.");
+    if (framing === "check") issues.push("Pastikan tepi struk dan bagian total terlihat utuh.");
+    const assessment = {
+      resolution,
+      lighting,
+      sharpness,
+      framing,
+      width: bitmap.width,
+      height: bitmap.height,
+      issues,
+    } satisfies ReceiptPhotoAssessment;
+    bitmap.close();
+    return assessment;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Crops likely paper boundaries, enlarges narrow receipts, raises contrast, and
  * removes embedded metadata. The original preview remains local in memory.
@@ -169,12 +241,14 @@ function renderReceiptCanvas(
  * the fast first pass; the stronger contrast variant is only OCR'd when the
  * parsed subtotal indicates missing or misaligned rows.
  */
-export async function prepareReceiptImageVariants(file: File) {
+export async function prepareReceiptImageVariants(file: File, options: ReceiptImageOptions = {}) {
   if (typeof createImageBitmap !== "function") return [file];
 
   try {
     const bitmap = await createImageBitmap(file);
-    const crop = detectBounds(bitmap);
+    const crop = options.autoCrop === false
+      ? { x: 0, y: 0, width: bitmap.width, height: bitmap.height }
+      : detectBounds(bitmap);
     const downscale = Math.min(
       1,
       MAX_INFERENCE_DIMENSION / Math.max(crop.width, crop.height),
@@ -213,8 +287,8 @@ export async function prepareReceiptImageVariants(file: File) {
   }
 }
 
-export async function prepareReceiptImage(file: File) {
-  const variants = await prepareReceiptImageVariants(file);
+export async function prepareReceiptImage(file: File, options: ReceiptImageOptions = {}) {
+  const variants = await prepareReceiptImageVariants(file, options);
   return variants[0] ?? file;
 }
 
@@ -232,11 +306,13 @@ export function serverReceiptOutputSize(width: number, height: number) {
 }
 
 /** Produces a metadata-free, bounded upload for the private server OCR path. */
-export async function prepareServerReceiptImage(file: File) {
+export async function prepareServerReceiptImage(file: File, options: ReceiptImageOptions = {}) {
   if (typeof createImageBitmap !== "function") return null;
   try {
     const bitmap = await createImageBitmap(file);
-    const crop = detectBounds(bitmap);
+    const crop = options.autoCrop === false
+      ? { x: 0, y: 0, width: bitmap.width, height: bitmap.height }
+      : detectBounds(bitmap);
     const output = serverReceiptOutputSize(crop.width, crop.height);
     let { width, height } = output;
     for (const quality of [0.86, 0.76, 0.66]) {

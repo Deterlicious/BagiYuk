@@ -92,6 +92,29 @@ describe("calculateSplit", () => {
     expect(result.participants.map(({ total }) => total)).toEqual([10_000, 10_000]);
   });
 
+  it("splits an item by explicit portions and keeps the odd rupiah deterministic", () => {
+    const result = calculateSplit(
+      makeInput({
+        items: [{ id: "item-1", name: "Pizza", quantity: 1, unitPrice: 10_001, lineTotal: 10_001 }],
+        assignments: [{
+          itemId: "item-1",
+          participantIds: ["person-1", "person-2"],
+          weights: { "person-1": 2, "person-2": 1 },
+        }],
+        charges: {
+          statedSubtotal: 10_001,
+          tax: 0,
+          serviceCharge: 0,
+          discount: 0,
+          rounding: 0,
+          receiptTotal: 10_001,
+        },
+      }),
+    );
+    expect(result.participants.map(({ itemSubtotal }) => itemSubtotal)).toEqual([6_667, 3_334]);
+    expect(result.participants.reduce((sum, participant) => sum + participant.total, 0)).toBe(10_001);
+  });
+
   it("assigns an odd shared-item rupiah deterministically", () => {
     const result = calculateSplit(
       makeInput({

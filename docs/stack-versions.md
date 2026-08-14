@@ -1,6 +1,6 @@
 # Stack versions
 
-Verified against the npm/Python package metadata on 11 August 2026. All selected releases are stable; no beta, canary, or release-candidate packages are used.
+Verified against the npm/Python package metadata on 14 August 2026. All directly selected releases are stable; no beta, canary, or release-candidate packages are used.
 
 | Package | Version | Rationale |
 | --- | ---: | --- |
@@ -27,6 +27,7 @@ Verified against the npm/Python package metadata on 11 August 2026. All selected
 | Vitest | 4.1.10 | Current stable test runner. |
 | Playwright | 1.62.1 | Current stable browser test runner. |
 | ESLint / Next config | 9.39.5 / 16.3.0 | Newest stable major accepted by the React/a11y/import plugins bundled with the Next config. |
+| Sharp (Next.js transitive) | 0.35.3 | Build-time generator for repository-owned PNG PWA assets; no runtime image persistence. |
 
 Runtime used during development: Node.js 22.21.0 and pnpm 11.16.0.
 

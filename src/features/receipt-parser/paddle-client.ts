@@ -1,4 +1,4 @@
-import { prepareReceiptImageVariants } from "@/lib/image-client";
+import { prepareReceiptImageVariants, type ReceiptImageOptions } from "@/lib/image-client";
 import {
   assessReceiptScan,
   receiptFromOcrLines,
@@ -44,6 +44,17 @@ async function getPaddleOcr() {
   return paddlePromise;
 }
 
+/**
+ * Starts the local OCR engine without reading an image. This is intentionally
+ * best-effort so a slow protected server scan can overlap the one-time model
+ * download without changing the selected OCR result.
+ */
+export async function prewarmReceiptParsing(signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  await getPaddleOcr();
+  signal?.throwIfAborted();
+}
+
 export async function cancelReceiptParsing() {
   const activePaddle = paddlePromise;
   paddlePromise = null;
@@ -60,10 +71,11 @@ export async function parseReceiptInBrowser(
   file: File,
   onStage?: (stage: ReceiptScanStage) => void,
   signal?: AbortSignal,
+  imageOptions: ReceiptImageOptions = {},
 ) {
   signal?.throwIfAborted();
   onStage?.("preparing");
-  const preparedVariants = await prepareReceiptImageVariants(file);
+  const preparedVariants = await prepareReceiptImageVariants(file, imageOptions);
   const primaryImage = preparedVariants[0] ?? file;
   signal?.throwIfAborted();
   onStage?.("loading-model");

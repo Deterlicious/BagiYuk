@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:e2e": "node scripts/run-e2e.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs",
+    "assets:pwa": "node scripts/generate-pwa-icons.mjs",
     "build": "next build",
     "cf:build": "opennextjs-cloudflare build && node scripts/prune-unused-ort-assets.mjs",
     "preview": "pnpm cf:build && opennextjs-cloudflare preview",

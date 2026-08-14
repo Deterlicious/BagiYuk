@@ -1,6 +1,6 @@
 import { editableReceiptSchema } from "@/domain/receipt/schemas";
 import type { EditableReceipt } from "@/domain/receipt/types";
-import { prepareServerReceiptImage } from "@/lib/image-client";
+import { prepareServerReceiptImage, type ReceiptImageOptions } from "@/lib/image-client";
 
 export type ServerOcrConfig = {
   enabled: boolean;
@@ -45,8 +45,9 @@ export async function parseReceiptOnServer(
   file: File,
   turnstileToken: string,
   signal?: AbortSignal,
+  imageOptions: ReceiptImageOptions = {},
 ): Promise<{ receipt: EditableReceipt; quotaRemaining: number | null }> {
-  const prepared = await prepareServerReceiptImage(file);
+  const prepared = await prepareServerReceiptImage(file, imageOptions);
   if (!prepared) {
     throw new ServerOcrError(
       "upload_preparation_failed",

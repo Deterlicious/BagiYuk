@@ -133,3 +133,23 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  body {
+    color: #111111;
+  }
+
+  .receipt-edge {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}

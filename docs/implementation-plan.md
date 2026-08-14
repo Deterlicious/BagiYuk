@@ -1,7 +1,29 @@
 # BagiYuk MVP Implementation Plan
 
-Status: implemented, verified, and active in production with protected Cloud Run OCR
-Last updated: 11 August 2026
+Status: Professional v2 implemented and verified locally
+Last updated: 15 August 2026
+
+## Professional v2 product hardening
+
+- Split receipt scanning into independent server and local phases so a Cloud Run timeout cannot consume the browser fallback budget or discard a valid server candidate.
+- Warm the local OCR engine only when the protected server scan is taking unusually long, preserve the best available candidate, and show phase-specific progress and recovery copy.
+- Add an in-memory photo preflight and keep the receipt photo available during mandatory verification without saving it to draft storage.
+- Support weighted item ownership (for example two portions versus one) while keeping integer-rupiah allocation and deterministic remainder handling exclusively in `src/domain/billing`.
+- Let users select who paid the restaurant and generate clear transfer instructions from the final, reconciled allocation without introducing payments or accounts.
+- Turn sample data into a complete guided example, surface resumable local drafts on the homepage, and preserve explicit fresh-start behavior.
+- Add dedicated privacy and system-diagnostic pages, branded error and not-found states, richer metadata, safe response headers, print-friendly results, and CI quality gates.
+- Extend unit and end-to-end coverage for weighted allocation, OCR fallback, resume/sample behavior, settlement handoff, accessibility, and mobile/desktop layouts.
+- Verify the complete release through TypeScript, lint, unit tests, production build, `workerd` preview, and Playwright before deployment.
+
+Verification completed on 15 August 2026:
+
+- Protected server and local OCR now have independent phase budgets; delayed local prewarming begins only after a slow server phase, and a valid server result survives a local cross-check timeout.
+- Photo preflight reports resolution, lighting, sharpness, and framing guidance. Users can override automatic crop with the full-photo mode, and the original in-memory photo remains available during mandatory verification without entering draft storage.
+- Weighted item portions are enforced through the existing integer-only domain allocator. A 2:1 odd-rupiah regression case and conservation assertion pass.
+- The guided sample includes three members and complete assignments. Results now support an optional initial payer, transfer instructions, individual payer-aware messages, and print/PDF output without adding payment processing.
+- Homepage draft resume, Privacy, Diagnostics, custom error/404, generated PNG/maskable PWA assets, social preview, sitemap/robots, safe response headers, offline-shell expansion, and GitHub Actions/Dependabot configuration are included.
+- TypeScript, ESLint, 61 Vitest checks, the Next.js production build, OpenNext bundle, and 12 Playwright mobile/desktop scenarios pass. `workerd` returned 200 for all public pages and metadata routes, 404 for an unknown route, and the expected `nosniff` header.
+- Direct browser QA at 390×844 and 1440×1000 confirmed zero horizontal overflow, a usable weighted-assignment and settlement flow, a visible resumable draft, and no console warnings or errors.
 
 ## Protected Cloud Run receipt intelligence
 

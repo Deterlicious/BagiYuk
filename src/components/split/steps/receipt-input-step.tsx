@@ -21,10 +21,15 @@ import { TurnstileWidget } from "@/components/ui/turnstile-widget";
 import { editableReceiptSchema } from "@/domain/receipt/schemas";
 import type { EditableReceipt } from "@/domain/receipt/types";
 import { trackProductEvent } from "@/lib/analytics";
-import { rotateReceiptImage } from "@/lib/image-client";
+import {
+  assessReceiptPhoto,
+  rotateReceiptImage,
+  type ReceiptPhotoAssessment,
+} from "@/lib/image-client";
 import {
   cancelReceiptParsing,
   parseReceiptInBrowser,
+  prewarmReceiptParsing,
   type ReceiptScanStage,
 } from "@/features/receipt-parser/paddle-client";
 import {
@@ -47,7 +52,29 @@ import {
 } from "@/features/receipt-parser/server-client";
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
-const SCAN_TIMEOUT_MS = 150_000;
+const SERVER_PHASE_TIMEOUT_MS = 88_000;
+const LOCAL_PHASE_TIMEOUT_MS = 135_000;
+const LOCAL_CROSS_CHECK_TIMEOUT_MS = 70_000;
+const LOCAL_PREWARM_DELAY_MS = 8_000;
+
+async function runWithPhaseTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  parentSignal: AbortSignal,
+  timeoutMs: number,
+  timeoutReason: string,
+) {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(parentSignal.reason);
+  if (parentSignal.aborted) forwardAbort();
+  else parentSignal.addEventListener("abort", forwardAbort, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(timeoutReason), timeoutMs);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    window.clearTimeout(timeout);
+    parentSignal.removeEventListener("abort", forwardAbort);
+  }
+}
 
 export function ReceiptInputStep({
   onManual,
@@ -56,7 +83,7 @@ export function ReceiptInputStep({
 }: {
   onManual: () => void;
   onSample: () => void;
-  onParsed: (receipt: EditableReceipt) => void;
+  onParsed: (receipt: EditableReceipt, photo: File) => void;
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -68,11 +95,13 @@ export function ReceiptInputStep({
   const [error, setError] = useState("");
   const [errorDetail, setErrorDetail] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [photoAssessment, setPhotoAssessment] = useState<ReceiptPhotoAssessment | null>(null);
   const [serverConfig, setServerConfig] = useState<ServerOcrConfig | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileAttempt, setTurnstileAttempt] = useState(0);
   const [serverNotice, setServerNotice] = useState("");
   const [scanPath, setScanPath] = useState<ReceiptScanPath>("local");
+  const [useFullPhoto, setUseFullPhoto] = useState(false);
 
   const handleTurnstileToken = useCallback((token: string | null) => {
     setTurnstileToken(token);
@@ -125,9 +154,12 @@ export function ReceiptInputStep({
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(selectedFile);
     setImageSize(null);
+    setPhotoAssessment(null);
     setScanPath("local");
+    setUseFullPhoto(false);
     setPreviewUrl(URL.createObjectURL(selectedFile));
-    void parseReceipt(selectedFile);
+    void assessReceiptPhoto(selectedFile).then(setPhotoAssessment);
+    void parseReceipt(selectedFile, false);
   }
 
   function removeFile() {
@@ -145,6 +177,8 @@ export function ReceiptInputStep({
     setErrorDetail("");
     setServerNotice("");
     setImageSize(null);
+    setPhotoAssessment(null);
+    setUseFullPhoto(false);
     if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
   }
@@ -156,13 +190,15 @@ export function ReceiptInputStep({
     setFile(rotated);
     setPreviewUrl(URL.createObjectURL(rotated));
     setImageSize(null);
+    setPhotoAssessment(null);
     setError("");
     setErrorDetail("");
     setServerNotice("");
-    void parseReceipt(rotated);
+    void assessReceiptPhoto(rotated).then(setPhotoAssessment);
+    void parseReceipt(rotated, useFullPhoto);
   }
 
-  async function parseReceipt(selectedFile = file) {
+  async function parseReceipt(selectedFile = file, fullPhoto = useFullPhoto) {
     if (!selectedFile || scanControllerRef.current) return;
     const controller = new AbortController();
     scanControllerRef.current = controller;
@@ -171,13 +207,6 @@ export function ReceiptInputStep({
     setElapsedSeconds(0);
     setStatus("preparing");
     trackProductEvent("scan_started");
-    let timeout = 0;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeout = window.setTimeout(() => {
-        controller.abort("timeout");
-        reject(new DOMException("Receipt scan timed out", "AbortError"));
-      }, SCAN_TIMEOUT_MS);
-    });
 
     try {
       let parsed: EditableReceipt | null = null;
@@ -186,12 +215,17 @@ export function ReceiptInputStep({
       const serverToken = serverConfig?.enabled && navigator.onLine ? turnstileToken : null;
       setScanPath(serverToken ? "server" : "local");
       if (serverToken) {
+        const prewarmTimer = window.setTimeout(() => {
+          void prewarmReceiptParsing(controller.signal).catch(() => undefined);
+        }, LOCAL_PREWARM_DELAY_MS);
         setStatus("server-reading");
         try {
-          const result = await Promise.race([
-            parseReceiptOnServer(selectedFile, serverToken, controller.signal),
-            timeoutPromise,
-          ]);
+          const result = await runWithPhaseTimeout(
+            (signal) => parseReceiptOnServer(selectedFile, serverToken, signal, { autoCrop: !fullPhoto }),
+            controller.signal,
+            SERVER_PHASE_TIMEOUT_MS,
+            "server-timeout",
+          );
           serverCandidate = result.receipt;
           serverQuotaRemaining = result.quotaRemaining;
           if (shouldCrossCheckServerReceipt(serverCandidate)) {
@@ -215,42 +249,36 @@ export function ReceiptInputStep({
           setStatus("local-fallback");
           if (serverError instanceof ServerOcrError && serverError.status === 429) {
             setServerNotice("Kuota pemindai pintar habis; scan dilanjutkan gratis di perangkat ini.");
+          } else if (serverError instanceof DOMException && serverError.name === "AbortError") {
+            setServerNotice("Pemindai pintar terlalu lama merespons; scan dilanjutkan gratis di perangkat ini.");
           } else {
             setServerNotice("Pemindai pintar belum berhasil; scan dilanjutkan aman di perangkat ini.");
           }
           await new Promise((resolve) => window.setTimeout(resolve, 800));
         } finally {
+          window.clearTimeout(prewarmTimer);
           setTurnstileToken(null);
           setTurnstileAttempt((value) => value + 1);
         }
       }
 
       if (!parsed) {
-        let crossCheckTimeout = 0;
         try {
-          const localPromise = parseReceiptInBrowser(
-            selectedFile,
-            (nextStatus) => {
-              if (controller.signal.aborted) return;
-              if (serverToken && nextStatus === "preparing") return;
-              setStatus(nextStatus);
-            },
+          const localCandidate = await runWithPhaseTimeout(
+            (signal) => parseReceiptInBrowser(
+              selectedFile,
+              (nextStatus) => {
+                if (controller.signal.aborted) return;
+                if (serverToken && nextStatus === "preparing") return;
+                setStatus(nextStatus);
+              },
+              signal,
+              { autoCrop: !fullPhoto },
+            ),
             controller.signal,
+            serverCandidate ? LOCAL_CROSS_CHECK_TIMEOUT_MS : LOCAL_PHASE_TIMEOUT_MS,
+            "local-timeout",
           );
-          const localCandidate = await Promise.race([
-            localPromise,
-            timeoutPromise,
-            ...(serverCandidate
-              ? [
-                  new Promise<never>((_, reject) => {
-                    crossCheckTimeout = window.setTimeout(
-                      () => reject(new Error("local_cross_check_timeout")),
-                      60_000,
-                    );
-                  }),
-                ]
-              : []),
-          ]);
           parsed = serverCandidate
             ? selectBestReceiptCandidate([serverCandidate, localCandidate])
             : localCandidate;
@@ -270,31 +298,25 @@ export function ReceiptInputStep({
           setServerNotice(
             "Pemeriksaan silang lokal belum selesai; hasil server tetap dibuka dan wajib diperiksa.",
           );
-          void cancelReceiptParsing();
-        } finally {
-          window.clearTimeout(crossCheckTimeout);
         }
       }
       const receipt = editableReceiptSchema.parse(parsed);
       controller.signal.throwIfAborted();
       scanControllerRef.current = null;
       trackProductEvent("scan_succeeded");
-      onParsed(receipt);
+      onParsed(receipt, selectedFile);
     } catch (scanError) {
       if (scanControllerRef.current === controller) scanControllerRef.current = null;
       setStatus("idle");
       if (["removed", "unmount", "user"].includes(String(controller.signal.reason))) return;
-      if (controller.signal.reason === "timeout") {
+      if (scanError instanceof DOMException && scanError.name === "AbortError") {
         trackProductEvent("scan_failed");
-        void cancelReceiptParsing();
-        setError("Pemindaian melewati batas waktu dan dihentikan. Coba lagi dengan foto lebih kecil atau lanjutkan manual.");
+        setError("Pemindai otomatis belum selesai dalam batas waktu. Foto tetap tersedia—coba lagi atau lanjutkan dengan input manual.");
         return;
       }
       setError(scanErrorMessage(scanError, navigator.onLine));
       setErrorDetail(scanErrorDetail(scanError));
       trackProductEvent("scan_failed");
-    } finally {
-      window.clearTimeout(timeout);
     }
   }
 
@@ -349,6 +371,19 @@ export function ReceiptInputStep({
                   <button
                     type="button"
                     className="grid size-12 place-items-center rounded-xl border border-line bg-white/95 text-ink shadow-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
+                    onClick={() => {
+                      const next = !useFullPhoto;
+                      setUseFullPhoto(next);
+                      setServerNotice(next ? "Scan berikutnya memakai seluruh foto tanpa crop otomatis." : "Fokus struk otomatis diaktifkan kembali.");
+                    }}
+                    aria-label={useFullPhoto ? "Aktifkan fokus struk otomatis" : "Gunakan seluruh foto tanpa crop"}
+                    aria-pressed={useFullPhoto}
+                  >
+                    <ScanLine aria-hidden="true" size={20} />
+                  </button>
+                  <button
+                    type="button"
+                    className="grid size-12 place-items-center rounded-xl border border-line bg-white/95 text-ink shadow-md transition hover:bg-white focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/25"
                     onClick={() => void rotatePhoto()}
                     aria-label="Putar foto 90 derajat"
                   >
@@ -366,14 +401,29 @@ export function ReceiptInputStep({
               )}
             </div>
 
-            <div className="mt-3 grid gap-2 rounded-xl border border-line bg-canvas/70 p-3 text-xs sm:grid-cols-3">
+            <div className="mt-3 grid gap-2 rounded-xl border border-line bg-canvas/70 p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
               <p className="flex items-center gap-2 font-bold text-success"><Check aria-hidden="true" size={15} /> Foto berhasil dimuat</p>
-              <p className="flex items-center gap-2 font-bold text-brand-strong"><ScanLine aria-hidden="true" size={15} /> Fokus struk otomatis</p>
+              <p className={`flex items-center gap-2 font-bold ${photoAssessment?.framing === "check" ? "text-warning" : "text-brand-strong"}`}>
+                {photoAssessment?.framing === "check" ? <Info aria-hidden="true" size={15} /> : <ScanLine aria-hidden="true" size={15} />}
+                {useFullPhoto ? "Memakai foto penuh" : photoAssessment?.framing === "check" ? "Cek bingkai struk" : "Fokus struk otomatis"}
+              </p>
+              <p className={`flex items-center gap-2 font-bold ${photoAssessment && photoAssessment.lighting !== "good" ? "text-warning" : "text-success"}`}>
+                {photoAssessment && photoAssessment.lighting !== "good" ? <Info aria-hidden="true" size={15} /> : <Check aria-hidden="true" size={15} />}
+                {photoAssessment ? (photoAssessment.lighting === "good" ? "Cahaya cukup" : "Cek pencahayaan") : "Memeriksa cahaya"}
+              </p>
               <p className={`flex items-center gap-2 font-bold ${imageSize && Math.max(imageSize.width, imageSize.height) >= 1200 ? "text-success" : "text-warning"}`}>
                 {imageSize && Math.max(imageSize.width, imageSize.height) >= 1200 ? <Check aria-hidden="true" size={15} /> : <Info aria-hidden="true" size={15} />}
                 {imageSize ? `${imageSize.width} × ${imageSize.height} px` : "Memeriksa resolusi"}
               </p>
             </div>
+            {photoAssessment && photoAssessment.issues.length > 0 && (
+              <div className="mt-3 rounded-xl border border-warning/25 bg-amber-50 px-4 py-3 text-xs leading-5 text-muted" role="status">
+                <p className="font-extrabold text-warning">Foto dapat dipindai, tetapi hasil bisa lebih baik:</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {photoAssessment.issues.map((issue) => <li key={issue}>{issue}</li>)}
+                </ul>
+              </div>
+            )}
 
             <div aria-live="polite" className="mt-5">
               {isParsing ? (
