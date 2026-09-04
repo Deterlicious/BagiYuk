@@ -29,12 +29,12 @@
     "@base-ui/react": "1.7.0",
     "@fontsource-variable/plus-jakarta-sans": "5.3.0",
     "@paddleocr/paddleocr-js": "0.4.2",
-    "lucide-react": "1.29.0",
-    "motion": "13.0.0",
-    "next": "16.3.0",
+    "lucide-react": "1.38.0",
+    "motion": "13.1.1",
+    "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "1.20.2",
